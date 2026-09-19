@@ -9,7 +9,8 @@ A DSH plugin that makes the model aware of its own context budget. DSH already s
 A real npm package in this repo, plain ESM JavaScript, **no build step**.
 
 - `package.json`: `"type": "module"`, an ESM `main`/`exports` entry, `peerDependencies` on `@deepseek-ai/cordis ^4.0.2` and `@deepseek-ai/schemastery ^3.18.2`, and `"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }`.
-- `cordis.patch.yml`: a single `- insert:` entry naming the package, so the row is composed globally rather than per session.
+- `cordis.patch.yml`: a single `- insert:` entry whose `name` is the **bare package name** (`dsh-context-sense`), so the row is composed globally rather than per session. A path-shaped name would be anchored to the patch file's own directory at load time, and through a linked install that realpaths back into this repo — the failure described below.
+- A bundle patch is read at boot, so changing this package's own `cordis.patch.yml` needs a **restart**. Only the profile and home patch layers are live-reloaded.
 - The plugin publishes **no service**, so no `isolate` realm is needed.
 - Mounted globally in the profile plane. It is **not** mounted in any agent preset.
 - Install: it must land as a **real directory** under `profiles\web\node_modules\<pkg>`, which is what an ordinary package install through the profile produces. Bare `@deepseek-ai/*` imports then resolve by Node's normal parent walk up into `profiles\node_modules`, and the declared bundle patch applies the row globally.
@@ -35,7 +36,16 @@ New-Item -ItemType Junction `
 
 Both paths realpath into the same install, so imports from the repo resolve to the *same module instances* the harness is running — verified by comparing `import('@deepseek-ai/dsh-llm')` from the repo against an absolute-path import of the installed file (`===` identical exports, so no split identity). A row in the profile patch layer naming `file:///E:/Home/projects/dsh-context-sense/lib/index.js` is then live-reloaded and source edits need no reinstall. `node_modules/` is gitignored, so the junction stays local.
 
-Scope: **top-level sessions only**. Every entry point returns early when `session.header.delegationDepth > 0` (or `session.header.origin === 'subagent'`), so subagent, workflow, and Ralph child agents get neither the prompt section nor either reminder. The registered tool remains visible in a subagent's tool list; if a subagent calls it, it answers normally.
+Source edits are still not watched by default: the launcher's fallback HMR row is created watch-only (`root: []`), and module reload is opt-in. Enable the shipped row through the profile patch layer, naming the repo explicitly — the default `ignored` list contains `**/node_modules`, so watching a directory that merely contains the install would not follow it:
+
+```yaml
+- id: hmr
+  disabled: false
+  config:
+    root: ['E:/Home/projects/dsh-context-sense']
+```
+
+Scope: **top-level sessions only**. Every entry point computes delegation depth the way DSH itself does — `Math.max(agent.options.subagentDepth ?? 0, agent.session.header.delegationDepth ?? 0)` — and returns early above zero, so subagent, workflow, and Ralph child agents get neither the prompt section nor either reminder. The durable header field alone is not sufficient: it is absent on a cold resume, which is exactly why DSH's own helper takes the max of the runtime and durable values. The registered tool remains visible in a subagent's tool list; if a subagent calls it, it answers normally.
 
 ## Configuration
 
@@ -44,10 +54,14 @@ Scope: **top-level sessions only**. Every entry point returns early when `sessio
 | `warnRatio` | `0.8` | warning line = **compaction threshold** × this value |
 | `rearmRatio` | `0.75` | usage must fall below **compaction threshold** × this to re-arm |
 | `oversizeTokens` | `4096` | a single tool result above this estimated token count is reported |
-| `compactionThresholdRatio` | none | fallback only, used when `ctx.compaction.config` cannot be read |
+| `compactionThresholdRatio` | none | **the compaction threshold ratio — set this explicitly** (ADR-0004) |
 | `toolDetailMax` | `5` | how many largest nodes `detail: 'top'` may list |
 
-All five are schemastery fields following house style. Unknown keys fail loudly.
+All five are schemastery fields following house style. Unknown keys fail loudly. `compactionThresholdRatio` deliberately has **no default** and is the one key that must be set: the live value is unreachable from the host plane (ADR-0004), and leaving it unset means the threshold is omitted and the reminder never fires.
+
+## Wiring
+
+`export const inject = ['tools']` is the entire hard-dependency set. `ctx.on(...)` requires no injection at all — which is why `dsh-repeat-tool-reminder` declares none and still listens to two events. Everything else is probed with `ctx.get`: `systemPrompt`, `sessionProjections`, `tokenMeter`. `compaction` is **not** probed, because it does not resolve from the host plane (ADR-0004).
 
 ## 1. Static facts in the system prompt
 
@@ -56,7 +70,7 @@ All five are schemastery fields following house style. Unknown keys fail loudly.
 The section is dynamic (`text` is a function of `assembleContext`), but it renders **only constants**: the context window and the compaction threshold, in absolute tokens first with the ratio in parentheses, plus one sentence of static guidance naming the tool. It carries no live number, and therefore does not change from step to step — the whole reason the design is shaped this way (see ADR-0001).
 
 Window: `contextPressure` projection view `contextWindow`, falling back to `session.requestContext()?.contextWindow`.
-Threshold: `Math.floor(window × ratio)` where `ratio` is read from `ctx.compaction.config.thresholdRatio`, honouring a `modelPolicies` override for the current `provider/model`; if that read yields nothing, `compactionThresholdRatio` from our own config; if neither exists, the threshold is **omitted from the text** rather than invented (see ADR-0002's sibling decision in the open items).
+Threshold: `Math.floor(window × ratio)`, where `ratio` is our own `compactionThresholdRatio` config value (ADR-0004). It is **not** read from DSH: `ctx.compaction` does not resolve from the host plane in the `web` profile — the bundle layer disables the root compaction row and the service lives in an agent-preset `isolate` realm — so a live read would silently yield nothing. With the key unset, the threshold is **omitted from the text** rather than invented.
 
 Before the session's first request the window is unknown, so the provider returns `''`. Empty sections are filtered out; once the window is known the text appears, costing exactly one appended prompt copy for the whole session.
 
@@ -69,7 +83,7 @@ Call `context_status` to read current usage, window, threshold, and headroom. Ca
 starting work that will produce large output, and after any reminder that you are near the limit.
 ```
 
-With the threshold unavailable, the second sentence is dropped.
+With the threshold unavailable, the second sentence is dropped, `context_status` reports the threshold as unavailable, and the warning-line reminder is inert — the warning line is a fraction of the threshold, so with no threshold there is no line to cross.
 
 ## 2. The `context_status` tool
 
@@ -133,7 +147,7 @@ Rendered text:
 in full — read it with offset/limit, or search it instead.
 ```
 
-Size is an estimate over the result's text (the token meter's 4-chars-per-token heuristic is the house approximation) — no size field exists on any tool event.
+Size is an estimate over the result's text (the token meter's 4-chars-per-token heuristic is the house approximation) — no size field exists on any tool event. The calling agent comes from `exec.agent` — never `exec.parent`, which is the PTC transport token marking a call made inside `run_code`, not a delegation marker.
 
 **Skipped when** the result was already externalised by spill-policy, so we never tell the model a result is big when its body is no longer in context.
 
@@ -147,8 +161,8 @@ The classifier and the notifier are separate: `evaluate()` decides *whether* a r
 | usage | same snapshot's `projectedTokens` |
 | breakdown | `sessionProjections.snapshot(session, ['contextBreakdown'])` |
 | largest nodes | `ctx.tokenMeter.measure(session).nodes` |
-| compaction ratio | `ctx.compaction.config.thresholdRatio`, plus a `modelPolicies` override lookup |
-| top-level test | `agent.session.header.delegationDepth` |
+| compaction ratio | our own `compactionThresholdRatio` config (ADR-0004) — the live `ctx.compaction` is unreachable from the host plane |
+| top-level test | `Math.max(agent.options.subagentDepth ?? 0, agent.session.header.delegationDepth ?? 0) > 0` |
 
 ## Non-goals
 
@@ -161,4 +175,5 @@ Pure decision logic — crossing, hysteresis, re-arm after compaction, window ch
 ## Open items
 
 - **Unverified**: that a `file:`-URL row actually loads under the junction arrangement described above. The *resolution* half is verified (same module instances); the row load itself was not exercised, because doing so means editing the live profile patch layer of a running harness.
-- **Unverified**: the exact package-manager command that yields a real directory rather than a symlink. The distinction is `file:` (hard-linked copy) versus `link:` (symlink) in pnpm terms, and only the former satisfies the constraint above. The reference third-party plugin's README prescribes `dsh plugin --profile web add <packed-dir>`, which is the shape to copy.
+- **Unverified**: the exact package-manager command that yields a real directory rather than a symlink. The distinction is `file:` (hard-linked copy) versus `link:` (symlink) in pnpm terms, and only the former satisfies the install constraint. The reference third-party plugin's README prescribes `dsh plugin --profile web add <packed-dir>`, which is the shape to copy.
+- **Not pursued**: whether `agent.ctx.get('compaction')` could reach the compaction service inside the agent preset's `isolate` realm. Agent scope keys are minted with no parent, so it may not chain into the preset's realm. ADR-0004 makes the question moot for now, and it is the one route that would restore a single source of truth.
