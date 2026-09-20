@@ -1,0 +1,21 @@
+# The context-sense bundle patch: the row that mounts this plugin.
+#
+# `dsh.bundle.patch` in package.json points here, so a profile that lists this
+# package in `dsh.profile.bundles` applies this `insert` over its empty entry
+# root. The file is the harness's entry-list dialect: plain YAML rows, with
+# `!!js <expr>` available where a row's config or disabled flag needs an
+# expression (`name` is a plain string — the loader imports it verbatim).
+#
+# The row name is this package's own name. A bundle patch is applied at the
+# profile's baseUrl, and a profile links every bundle into its own
+# node_modules, so a package specifier is the form that resolves wherever the
+# profile lives; a local absolute path or a file URL is equally valid for a
+# checkout that is not installed as a bundle.
+- insert:
+    - id: context-sense
+      name: dsh-context-sense
+      config:
+        # The standing capacity statement in each agent's system prompt. The
+        # reminder tiers keep their schema defaults (0.60 and 0.75).
+        statement:
+          enabled: true

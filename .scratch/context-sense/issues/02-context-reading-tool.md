@@ -1,4 +1,4 @@
-# 02: `context_status` tool reporting the live reading
+# 02: `context_reading` tool reporting the live reading
 
 **What to build:** The model can ask, at any point in a session, what its context looks like right now, and gets
 back a source-attributed reading: how much capacity the route has, what the harness projects the next request

@@ -17,7 +17,7 @@ behaviour depends most on that measurement is the only one not informed.
 ## Solution
 
 A plugin, `context-sense`, with three contributions: a standing system-prompt statement of the session's
-context capacity; a parameterless `context_status` tool for on-demand pressure, ratio, remaining room and
+context capacity; a parameterless `context_reading` tool for on-demand pressure, ratio, remaining room and
 composition; and advisory `<system-reminder>` messages when a configured pressure tier is reached or a single
 tool result is oversized. The plugin is **append-only with respect to the conversation**: it never compacts,
 prunes, rewrites, reorders or truncates existing history, never calls the compaction engine, and its only
@@ -30,7 +30,7 @@ conversation contributions are messages it authors itself (source `{ kind: 'plug
 scoped `inject` and held as a disposer tied to that agent: install for every agent the registry already holds,
 and for each one announced later (`agent/created`). Installing only on session start would silently skip
 agents already live when the plugin loads. The text states the route's capacity in tokens when one is known,
-says plainly that capacity is not yet known otherwise, names the `context_status` tool, states the configured
+says plainly that capacity is not yet known otherwise, names the `context_reading` tool, states the configured
 reminder tiers, and states that a reminder describes committed history and that the threshold it names is an
 assumed policy value. It sits at a fixed order after the harness identity and persona prefix and ahead of the
 policy and tool sections. It is never marked `complete`.
@@ -40,7 +40,7 @@ message on every step (under `systemPromptUpdate: 'in-history'`) or rewrite the 
 the provider cache. Capacity changes only when the route changes, so the statement is stable within a route
 and the live figure travels only by tool call and reminder.
 
-**`context_status` tool.** One parameterless tool (`parameters: {}`) under a name that does not collide with a
+**`context_reading` tool.** One parameterless tool (`parameters: {}`) under a name that does not collide with a
 built-in. Its canonical value is the declared `output.schema` — capacity plus a capacity-known flag, the
 pressure figure plus a pressure state of `known` / `unknown` / `stale`, remaining, ratio, composition, a
 per-figure provenance label, and the two compaction facts — with a separate pure `output.render(args, value)`
