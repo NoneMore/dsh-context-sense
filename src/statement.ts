@@ -9,6 +9,7 @@
  *
  * @module dsh-context-sense/statement
  */
+import { CONTEXT_READING_TOOL_NAME } from './reading-tool.js'
 
 /** The facts the statement states, resolved at each prompt assembly. */
 export interface CapacityStatementInput {
@@ -21,9 +22,6 @@ export interface CapacityStatementInput {
   /** Configured reminder tier ratios, as fractions of the context window. */
   readonly reminderTiers: readonly number[]
 }
-
-/** The tool the model calls for a live reading of its context. */
-export const CONTEXT_READING_TOOL_NAME = 'context_reading'
 
 /** The section's unique name within one agent's prompt scope. */
 export const CAPACITY_SECTION_NAME = 'context-sense:capacity'
@@ -44,7 +42,11 @@ export const CAPACITY_STATEMENT_ORDER = 100
 export function renderCapacityStatement(input: CapacityStatementInput): string {
   return [
     capacitySentence(input.contextWindow),
-    `Call the \`${CONTEXT_READING_TOOL_NAME}\` tool at any time for a live reading of context pressure, remaining room and composition.`,
+    // Deliberately neutral about which figures the tool reports: this slice's
+    // reading reports pressure and composition but not yet the ratio or the
+    // remaining room, so naming them here would promise the model a figure the
+    // tool refuses. The tool's own description carries that detail.
+    `Call the \`${CONTEXT_READING_TOOL_NAME}\` tool at any time for a live, source-attributed reading of this session's context.`,
     reminderSentence(input.reminderTiers),
   ].join('\n')
 }

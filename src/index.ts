@@ -1,9 +1,11 @@
 /**
  * Context Sense: give the model awareness of its own context window.
  *
- * This first slice contributes one thing — a standing system-prompt statement,
- * registered once per agent, of how much room the current route allows, or a
- * plain statement that capacity is not yet known.
+ * This slice contributes two things: a standing system-prompt statement,
+ * registered once per agent, of how much room the current route allows — or a
+ * plain statement that capacity is not yet known — and the parameterless
+ * `context_reading` tool, which reports a source-attributed reading of the
+ * live session on demand.
  *
  * @module dsh-context-sense
  */
@@ -11,6 +13,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import z from '@deepseek-ai/schemastery'
 
+import { createContextReadingTool } from './reading-tool.js'
 import { CAPACITY_SECTION_NAME, CAPACITY_STATEMENT_ORDER, renderCapacityStatement } from './statement.js'
 
 /** The plugin's identity, used for attribution and as its name in diagnostics. */
@@ -19,12 +22,12 @@ export const name = 'context-sense'
 /**
  * The services this plugin requires a composition to mount.
  *
- * This slice contributes only the capacity statement, which reads `agents`
- * and `systemPrompt`. `tools`, `sessionProjections` and `tokenMeter` are named
- * because the spec fixes ONE load-time contract for the whole first version —
- * the `context_reading` tool, the reminder state and the oversized-result rule
- * are the later slices that read them — and a composition missing any of them
- * should leave this plugin pending at load rather than degrade silently later.
+ * This slice contributes the capacity statement, which reads `agents` and
+ * `systemPrompt`, and the `context_reading` tool, which reads `tools` and
+ * `sessionProjections`. `tokenMeter` is named because the spec fixes ONE
+ * load-time contract for the whole first version — the oversized-result rule is
+ * the later slice that reads it — and a composition missing any of them should
+ * leave this plugin pending at load rather than degrade silently later.
  */
 export const inject = ['agents', 'sessionProjections', 'systemPrompt', 'tools', 'tokenMeter']
 
@@ -33,6 +36,13 @@ export const Config = z.object({
   statement: z
     .object({
       /** Register the standing capacity statement in every agent's prompt. */
+      enabled: z.boolean().default(true),
+    })
+    // Stated in full because an object default is the whole value, not a patch.
+    .default({ enabled: true }),
+  tool: z
+    .object({
+      /** Register the `context_reading` tool the model calls for a live reading. */
       enabled: z.boolean().default(true),
     })
     // Stated in full because an object default is the whole value, not a patch.
@@ -50,8 +60,18 @@ export type ContextSenseConfig = Schemastery.TypeT<typeof Config>
  * @param config - validated plugin config.
  */
 export function apply(ctx: Context, config: ContextSenseConfig): void {
-  if (!config.statement.enabled) return
+  // The statement and the tool are independently switchable: a deployment may
+  // want the standing statement without a tool, or the reverse.
+  if (config.statement.enabled) installCapacityStatements(ctx, config.reminderTiers)
+  if (config.tool.enabled) ctx.tools.register(createContextReadingTool(ctx.sessionProjections))
+}
 
+/**
+ * Register the standing capacity statement in every agent's prompt scope.
+ * @param ctx - the plugin's context.
+ * @param reminderTiers - configured reminder tier ratios, named by the statement.
+ */
+function installCapacityStatements(ctx: Context, reminderTiers: readonly number[]): void {
   // One disposer per live agent. Holding them here is what lets the plugin
   // unload remove every section it registered; releasing an entry when its
   // agent is disposed is what keeps a long-lived plugin from pinning the
@@ -72,7 +92,7 @@ export function apply(ctx: Context, config: ContextSenseConfig): void {
         text: () =>
           renderCapacityStatement({
             contextWindow: agent.session.requestContext()?.contextWindow,
-            reminderTiers: config.reminderTiers,
+            reminderTiers,
           }),
       }),
     )
