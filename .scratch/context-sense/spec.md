@@ -911,7 +911,10 @@ deferred task:
   returned decision's `messages`. For the fork cut specifically, `dsh-schedule` is the prior art — it takes the
   exact `inheritedEventCount` in `init`, stores it in state, guards `apply` with `event.seq <
   state.inheritedEventCount`, and documents that a fork folds only `ownEvents()` so a child never inherits its
-  parent's reminders. The token metering package's estimator is likewise a pure module, and the harness's
+  parent's reminders. `dsh-time-context` is deliberately **not** the prior art here: its `init` takes no cut and
+  its `apply` has no `seq` guard, so it folds a fork's inherited prefix as if it were the child's own history.
+  The plugin copies that plugin's registration, read and delivery shape, and takes the cut from `dsh-schedule`.
+  The token metering package's estimator is likewise a pure module, and the harness's
   repeat-call reminder is the prior art for load-time fail-loud threshold validation and for attaching a
   plugin-sourced `additionalContexts` message at post-execute.
 - **Not tested at this seam:** the harness's own hook dispatch, prompt assembly, tool registration or message
