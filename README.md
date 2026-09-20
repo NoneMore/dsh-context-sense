@@ -113,6 +113,24 @@ npm run smoke:pack
 
 Before publishing, `prepublishOnly` runs `npm run verify:release`, which type-checks, runs the test suite, and executes the packed-install smoke test.
 
+## Release
+
+GitHub releases are created by the `Release` workflow; the workflow does **not** publish to npm.
+
+For a new version, update both package manifests without creating a local tag, then merge that version bump to `master`:
+
+```sh
+npm version <version> --no-git-tag-version
+```
+
+After the version bump is on `master`:
+
+1. Open **Actions → Release → Run workflow**.
+2. Select the `master` branch.
+3. Enter the package version without the leading `v` (for example, `0.1.0`).
+
+The workflow refuses to release from another branch, refuses a version that does not exactly match `package.json`, and refuses to reuse an existing tag. It then runs `npm run verify:release`, creates the distributable `.tgz` plus a SHA-256 checksum, and publishes a GitHub Release whose `v<version>` tag points at the exact commit that passed verification. Prerelease versions such as `0.2.0-rc.1` are marked as GitHub prereleases automatically.
+
 ## License
 
 MIT
