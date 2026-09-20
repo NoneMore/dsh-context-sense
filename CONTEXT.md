@@ -56,12 +56,20 @@ _Avoid_: threshold, level, band
 The count of summary compactions in a session's own history, starting at zero. The unit in which a tier fires once-only; only a summary compaction opens a new one, and it is rebuilt from the durable log's own suffix, never from a parent's inherited history or process memory.
 _Avoid_: cycle, round, generation
 
+**Oversized-result trigger**:
+The configured figure one raw tool result is reported above, in exactly one form at a time. An operator-configured assumption with its own flag, never a reading of how much room a result ought to take.
+_Avoid_: result limit, size cap, budget
+
+**Fixed token threshold**:
+The oversized-result trigger stated as an absolute token count — the form in force unless another is named, because it needs no capacity and does not rescale when the route's window changes. A price the harness's meter estimates rather than counts, so it is an approximation stated in the same units as every other context figure.
+_Avoid_: token limit, token budget, size limit
+
 **Result share**:
-The fraction of the route's capacity one raw tool result may occupy before the plugin reports it. An operator-configured assumption with its own flag, never a reading of how much room a result ought to take.
+The oversized-result trigger stated as a fraction of the route's capacity, eligible only while a capacity is known — a share of an unknown window has no denominator, and the plugin never fabricates one.
 _Avoid_: result limit, size threshold, budget
 
 **Oversized result**:
-One raw tool result whose harness-priced size exceeds the route's result share. Priced where the result is dispatched — before the tool's own finalization — so the report may quote more than the model received.
+One raw tool result whose harness-priced size exceeds the oversized-result trigger in force. Priced where the result is dispatched — before the tool's own finalization — so the report may quote more than the model received.
 _Avoid_: large output, big result
 
 **Own suffix**:
