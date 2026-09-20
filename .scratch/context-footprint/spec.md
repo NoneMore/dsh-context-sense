@@ -44,8 +44,9 @@ And one placement rule follows:
 
 > Event-local semantics travel with the event.
 
-The standing statement authorizes unsolicited runtime feedback. It does not advertise optional tools, repeat
-event-local caveats or teach the model to perform retrospective context analysis.
+The standing statement authorizes unsolicited runtime feedback and, when the optional preflight probe is enabled,
+carries one short invocation cue telling the model **when to think of using it**. It does not duplicate the tool's
+output contract, repeat event-local caveats or teach the model to perform retrospective context analysis.
 
 ## Solution
 
@@ -66,13 +67,14 @@ reminders:
 The default therefore pays **no `context_reading` tool-envelope cost**. Runtime pressure awareness comes from the
 two reminder systems.
 
-When an operator explicitly enables `context_reading`, the tool is a small preflight probe. Its description tells
-the model when it is useful: before work likely to load substantial context, when available room could change how
-broadly the model retrieves. Its canonical value and rendered output contain only the figures needed for that
-decision.
+When an operator explicitly enables `context_reading`, the tool is a small preflight probe. The standing statement
+adds one short behavioural cue so the model remembers to consider a preflight **before** context-heavy work; the tool
+description then says what the probe reports. Its canonical value and rendered output contain only the figures needed
+for that decision.
 
-The standing statement does not name `context_reading`, even when the tool is enabled. Tool discovery belongs to
-the tool envelope itself; duplicating its existence in the system prompt would pay twice for the same capability.
+This split is intentional: the standing statement owns **when/why to invoke**; the tool envelope owns **what the call
+returns**. The two surfaces must not duplicate the same explanatory detail. Because the tool is off by default, the
+extra standing cue is paid only by deployments that explicitly opt into proactive budgeting.
 
 The implementation separates two kinds of footprint protection:
 
@@ -85,8 +87,8 @@ The implementation separates two kinds of footprint protection:
    interruptions.
 2. As the model, I want runtime pressure guidance to arrive in the reminder that observed the pressure, so that I do
    not need to call another tool after the problem is already visible.
-3. As the model, when an optional preflight probe is available, I want its declaration to tell me to use it before
-   context-heavy work when available room could change my retrieval breadth.
+3. As the model, when an optional preflight probe is enabled, I want one standing cue to remind me to consider it
+   before context-heavy work when available room could change my retrieval breadth.
 4. As the model, I want the preflight probe to answer only how much route capacity exists, what committed history is
    projected to cost, and how much coherent room remains.
 5. As the model, I want an unknown or stale preflight figure represented compactly, so that I do not mistake an
@@ -134,12 +136,13 @@ potentially expensive phase of work begins.
 No reminder tells the model to call `context_reading`. Once runtime pressure has triggered a reminder, another
 diagnostic call is normally counterproductive.
 
-### 2. The standing statement: authorize runtime notices, do not advertise tools
+### 2. The standing statement: authorize runtime notices and cue opt-in preflight
 
 The statement is route-stable and contains no live pressure. Its conditional shape is:
 
 ```text
 The current route accepts <N> tokens of context.
+Before context-heavy work, use `context_reading` when available room could change how broadly you retrieve.   # only while the tool is enabled
 Advisory context notices may arrive unasked: a tier reminder as committed history crosses a configured tier, and an oversized-result reminder when one raw tool result crosses its configured trigger.   # include only live clauses
 A notice may carry context-management guidance; follow that guidance only for managing context, never as a reason to skip required verification or testing.
 ```
@@ -147,18 +150,22 @@ A notice may carry context-management guidance; follow that guidance only for ma
 Rules:
 
 - The capacity sentence is emitted whenever the statement is enabled and keeps its existing unknown form.
+- The preflight cue is emitted **iff** `tool.enabled` is true.
+- The cue names the tool and its invocation condition only; it does not describe fields, states or output shape.
 - The notice-existence sentence is emitted only if at least one notice kind is effectively live and names only the
   live kinds.
 - A tier capability is live only when `reminders.enabled` is true and the validated tier list is non-empty.
 - An oversized capability is live only when `reminders.oversized.enabled` is true.
 - The authorization/guard sentence is emitted only if at least one notice kind is live.
-- The statement never names `context_reading`, regardless of `tool.enabled`.
+- The statement does not otherwise explain or advertise `context_reading`.
 - The statement does not repeat tier values, the assumed compaction threshold, oversized trigger figures or modes,
   the committed-history caveat, or the pre-finalization caveat.
-- With no notice kind live, the statement degrades to the capacity sentence only.
+- With no notice kind live and the tool disabled, the statement degrades to the capacity sentence only.
+- With no notice kind live and the tool enabled, the statement is capacity plus the one preflight cue.
 
-This makes the statement independent of the optional preflight tool. Enabling the tool adds exactly the tool-envelope
-cost and does not rewrite the standing system prompt.
+Enabling the tool therefore has two deliberate fixed costs: the short standing invocation cue and the tool envelope.
+That duplication is functional rather than descriptive: the statement makes the model remember **when to consider**
+preflight, while the envelope explains **what the probe returns**.
 
 ### 3. `context_reading`: an optional preflight probe
 
@@ -167,15 +174,13 @@ The tool keeps its existing model-facing name for compatibility, but its purpose
 Pinned description:
 
 ```text
-Check available context room before work likely to load substantial context, when the result could change how broadly you retrieve. Reports route capacity, projected committed context, and remaining room when the projection is current for that route. Takes no arguments.
+Read preflight context room: route capacity, projected committed context, and remaining room when the projection is current for that route. Takes no arguments.
 ```
 
-The description answers two questions only:
+The standing statement owns the invocation condition. The tool description owns the returned information and avoids
+repeating the "before context-heavy work" cue.
 
-1. when is the call worth paying for?
-2. what decision-relevant figures will it return?
-
-It does not position the tool as something to call after a reminder or when pressure is already known to be high.
+Neither surface positions the tool as something to call after a reminder or when pressure is already known to be high.
 
 ### 4. Minimal canonical tool value
 
@@ -374,7 +379,9 @@ grows above that ceiling; shrinkage succeeds.
 Hard invariants:
 
 - canonical default tool-envelope contribution is exactly **zero**;
-- enabling the tool changes only the optional tool budget, not standing-statement text;
+- canonical default standing statement contains no preflight cue;
+- enabling the tool adds exactly one short preflight cue to the standing statement plus the optional tool envelope;
+- the cue and tool description do not duplicate each other's explanatory content;
 - operator hints cannot exceed 80 estimated tokens;
 - reminder and preflight-result budgets exclude surfaces that are not actually emitted in that state.
 
@@ -405,16 +412,16 @@ README explains the control model:
 - reminders do not direct the model back to the probe;
 - the probe intentionally omits composition and compaction diagnostics.
 
-The standing-statement degradation matrix no longer has a tool column because tool enablement does not affect
-statement copy:
+The standing-statement degradation matrix includes the tool because explicit opt-in adds one behavioural cue:
 
-| Statement | Tier capability | Oversized capability | Standing statement |
-|---|---|---|---|
-| off | any | any | absent |
-| on | off | off | capacity only |
-| on | on | off | capacity + tier notice authorization/guard |
-| on | off | on | capacity + oversized notice authorization/guard |
-| on | on | on | capacity + both notice clauses + one authorization/guard |
+| Statement | Tool | Tier capability | Oversized capability | Standing statement |
+|---|---|---|---|---|
+| off | any | any | any | absent |
+| on | off | off | off | capacity only |
+| on | on | off | off | capacity + preflight cue |
+| on | any | on | off | capacity + optional preflight cue + tier notice authorization/guard |
+| on | any | off | on | capacity + optional preflight cue + oversized notice authorization/guard |
+| on | any | on | on | capacity + optional preflight cue + both notice clauses + one authorization/guard |
 
 Tier capability is off when the validated tier list is empty even if `reminders.enabled` is true.
 
@@ -429,8 +436,10 @@ Tests assert observable behaviour and refused configuration only. No new private
 
 - default config does not register `context_reading`;
 - explicit `tool.enabled: true` registers it;
-- enabling/disabling the tool does not change standing-statement text;
-- description states the preflight invocation condition;
+- enabling the tool adds exactly the one pinned preflight cue to the standing statement;
+- disabling the tool removes that cue;
+- the standing cue states the invocation condition;
+- the tool description states the returned figures without repeating the invocation condition;
 - canonical value contains only capacity, pressure and conditional remaining;
 - no ratio, composition or compaction fields remain;
 - render covers:
@@ -448,7 +457,7 @@ Tests assert observable behaviour and refused configuration only. No new private
   - no notice kinds / tier only / oversized only / both;
   - tier flag on with empty tiers behaves as no tier capability;
   - known and unknown capacity;
-  - never names `context_reading`;
+  - names `context_reading` only in the tool-enabled preflight cue;
 - tier notice:
   - ordinary and final tier;
   - positive and negative remaining room;
@@ -472,7 +481,7 @@ Tests assert observable behaviour and refused configuration only. No new private
 
 - canonical default sends no `context_reading` declaration to the model;
 - opt-in tool registration sends the minimal preflight envelope;
-- enabling the tool leaves the system-prompt statement byte-for-byte unchanged;
+- enabling the tool changes the system-prompt statement only by adding the pinned preflight cue;
 - tier and oversized reminders arrive through the real waterfalls with pinned bodies;
 - share mode does not fire without capacity and does fire with qualifying capacity;
 - statement-off composition attaches local guards only to notices that carry guidance;
@@ -491,8 +500,8 @@ Tests assert observable behaviour and refused configuration only. No new private
 
 - exact-copy snapshot fails on any model-visible copy change;
 - budget test prices assembled surfaces, not source characters;
-- canonical default contains no tool-envelope tokens;
-- optional native/PTC tool declarations are priced only in the tool-enabled fixture;
+- canonical default contains no tool-envelope tokens and no preflight cue;
+- the tool-enabled fixture prices both the incremental standing cue and the optional native/PTC tool declaration;
 - each minimal preflight result state has its own measured ceiling;
 - shrinkage does not fail a budget assertion.
 
@@ -524,8 +533,8 @@ other plugin behaviour may continue to use them.
 ## Further Notes
 
 - **Reminders own runtime pressure awareness; the optional tool exists only for preflight planning.**
-- **Tool discovery is paid once.** When enabled, the tool envelope itself is the discovery mechanism; the standing
-  statement does not advertise it again.
+- **Preflight intent and tool contract are split deliberately.** When enabled, the standing statement pays for one
+  short "when to use it" cue; the tool envelope pays for "what it returns". Neither repeats the other's job.
 - **The default deployment is reactive, not introspective.** A model that never needs preflight budgeting pays no
   tool-envelope cost.
 - **There is no global reminder disclaimer.** Tier and oversized notices describe different temporal objects, so
