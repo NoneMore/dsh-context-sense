@@ -307,46 +307,112 @@ function renderTierReminderBody(facts: ReminderBodyFacts): string {
 }
 
 /**
- * The share of the route's capacity one raw tool result may occupy before the
- * model hears about it.
+ * The fixed token threshold the plugin applies when the operator configures
+ * none: an absolute count of estimated tokens, and the form in force by default.
  *
- * A tenth by default, which is deliberately conservative: one result priced
- * against the whole window, reported while it is still attached to the step that
- * produced it, rather than a running total the plugin would have to maintain.
+ * 8,000 estimated tokens is roughly 32,000 bytes of ordinary text under the
+ * meter's four-characters-per-token heuristic — deliberately below the harness's
+ * own default 50,000-byte inline budget, so this plugin is the soft signal and
+ * the harness the hard one.
+ */
+export const DEFAULT_OVERSIZED_RESULT_TOKENS = 8_000
+
+/**
+ * The share of the route's capacity the plugin applies when the share form is
+ * selected and no share is configured.
+ *
+ * A tenth, deliberately conservative: one result priced against the whole
+ * window, reported while it is still attached to the step that produced it,
+ * rather than a running total the plugin would have to maintain.
  */
 export const DEFAULT_OVERSIZED_RESULT_SHARE = 0.1
 
+/** The form of the oversized-result trigger that is in force unless another is named. */
+export const DEFAULT_OVERSIZED_RESULT_MODE = 'tokens' as const
+
+/** The two mutually exclusive forms the oversized-result trigger takes. */
+export type OversizedResultMode = 'tokens' | 'share'
+
 /**
- * The oversized-result rule's policy: how much of the window one result may take.
+ * The oversized-result rule's policy: exactly one form of the trigger.
  *
- * Whether the listener is registered at all is, like the tier policy's own flag,
- * deliberately not part of this type: that is a load-time decision, and a
- * decision core able to see the flag could return a reminder for a rule that was
- * switched off.
+ * A discriminated union rather than one figure with a flag beside it, so neither
+ * the decision core nor the body renderer can read the field of a form that is
+ * not in force. Whether the listener is registered at all is, like the tier
+ * policy's own flag, deliberately not part of this type: that is a load-time
+ * decision, and a decision core able to see the flag could return a reminder for
+ * a rule that was switched off.
  */
-export interface OversizedResultPolicy {
-  /** The largest fraction of the route's context window one raw result may occupy unreported. */
-  readonly share: number
+export type OversizedResultPolicy =
+  | { readonly mode: 'tokens'; readonly tokens: number }
+  | { readonly mode: 'share'; readonly share: number }
+
+/**
+ * The oversized-result config block as the loader row supplies it.
+ *
+ * Both numeric fields are optional and carry no schema default, so "was it
+ * configured?" stays answerable: the field the form in force does not name must
+ * be absent, and a form's own field may be omitted for the plugin's default.
+ */
+export interface OversizedResultConfig {
+  /** Report one raw tool result that exceeds the trigger. Never read here: which listener runs is a load-time decision. */
+  readonly enabled?: boolean
+  /** The form of the trigger in force; the fixed token threshold when omitted. */
+  readonly mode?: OversizedResultMode
+  /** The fixed token threshold, in estimated tokens. Only with `mode: 'tokens'`. */
+  readonly tokens?: number
+  /** The share of the route's capacity one raw result may occupy. Only with `mode: 'share'`. */
+  readonly share?: number
 }
 
 /**
  * Validate the configured policy and freeze it for the decision core.
  *
- * Strict, like the tier ratios and for the same reason: a share is never clamped
- * into range, dropped or replaced by a default, because an unusable value is a
- * deployment error whose only honest outcome is failing the plugin at load.
+ * Strict, like the tier ratios and for the same reason: a figure is never
+ * clamped into range, dropped or replaced by a default, because an unusable
+ * value is a deployment error whose only honest outcome is failing the plugin at
+ * load. Exactly one form is in force, and a configuration naming the other
+ * form's field is refused rather than silently ignored — a leftover share from
+ * the form this plugin used to default to is a deliberate re-choice, not a value
+ * to keep running with.
  * @param config - the oversized-result config block the loader row supplied.
- * @returns the frozen policy.
- * @throws when the share is not a finite ratio strictly between 0 and 1.
+ * @returns the frozen policy, of the form in force.
+ * @throws when the field the form in force does not name is present, when
+ * `tokens` is not a positive integer, or when `share` is not a finite ratio
+ * strictly inside `(0, 1)`.
  */
-export function resolveOversizedResultPolicy(config: OversizedResultPolicy): OversizedResultPolicy {
-  const { share } = config
-  if (!isUnitRatio(share)) {
+export function resolveOversizedResultPolicy(config: OversizedResultConfig): OversizedResultPolicy {
+  const mode = config.mode ?? DEFAULT_OVERSIZED_RESULT_MODE
+  const { tokens, share } = config
+  if (mode === 'share') {
+    if (tokens !== undefined) {
+      throw new Error(
+        `${CONFIG_PATH}.oversized.tokens is only read by the fixed token threshold, which is not the form in force; remove it, or select mode "tokens"`,
+      )
+    }
+    const value = share ?? DEFAULT_OVERSIZED_RESULT_SHARE
+    if (!isUnitRatio(value)) {
+      throw new Error(
+        `${CONFIG_PATH}.oversized.share must be a finite ratio strictly between 0 and 1, got ${String(value)}`,
+      )
+    }
+    return Object.freeze({ mode: 'share', share: value })
+  }
+  if (share !== undefined) {
     throw new Error(
-      `${CONFIG_PATH}.oversized.share must be a finite ratio strictly between 0 and 1, got ${String(share)}`,
+      `${CONFIG_PATH}.oversized.share is only read by the result share, which is not the form in force; remove it, or select mode "share"`,
     )
   }
-  return Object.freeze({ share })
+  const value = tokens ?? DEFAULT_OVERSIZED_RESULT_TOKENS
+  if (!isPositiveInteger(value)) {
+    throw new Error(`${CONFIG_PATH}.oversized.tokens must be a positive integer, got ${String(value)}`)
+  }
+  return Object.freeze({ mode: 'tokens', tokens: value })
+}
+
+/** Whether a value is a whole, finite count of at least one. */
+function isPositiveInteger(value: number): boolean {
+  return Number.isInteger(value) && value > 0
 }
 
 /**
@@ -390,6 +456,32 @@ export interface OversizedResultReminder {
 }
 
 /**
+ * One oversized result's decided report: everything the notice and its one-line
+ * account state, and nothing they could disagree about.
+ *
+ * A report exists only for a result that is over the trigger in force, so its
+ * shape carries what that form's eligibility proved — under the fixed form the
+ * threshold, with a window beside it only if a route advertised one; under the
+ * share form the share and the window it is a share of, which that form has no
+ * denominator without.
+ */
+type OversizedReport =
+  | {
+      readonly kind: 'tokens'
+      readonly toolName: string
+      readonly estimatedTokens: number
+      readonly tokens: number
+      readonly capacity: number | undefined
+    }
+  | {
+      readonly kind: 'share'
+      readonly toolName: string
+      readonly estimatedTokens: number
+      readonly share: number
+      readonly capacity: number
+    }
+
+/**
  * Decide whether one raw tool result is oversized enough to report.
  *
  * The rule is deliberately conservative about what it can prove. It reports the
@@ -398,30 +490,50 @@ export interface OversizedResultReminder {
  * applies to one result at a time, never to a running total the plugin cannot
  * see.
  *
- * Suppression is one-directional: a pressure-tier reminder that went out in this
- * step already told the model where its context stands, so the oversized report
- * gives way. The reverse never happens — a tier signal is once per epoch, and
- * withholding it to make room for a per-result notice would lose it for the
- * whole epoch.
+ * The form in force decides the trigger and nothing else: the fixed token
+ * threshold compares an absolute count, so it holds on a route that advertises
+ * no capacity at all, while the share is a fraction of a window and cannot be
+ * applied without one. Suppression is one-directional either way — a
+ * pressure-tier reminder that went out in this step already told the model where
+ * its context stands, so the oversized report gives way. The reverse never
+ * happens: a tier signal is once per epoch, and withholding it to make room for
+ * a per-result notice would lose it for the whole epoch.
  * @param input - the tool, the priced result, the capacity, the policy and the folded step facts.
  * @returns the reminder, or `undefined` when nothing is owed.
  */
 export function decideOversizedResultReminder(
   input: OversizedResultReminderInput,
 ): OversizedResultReminder | undefined {
-  const { toolName, estimatedTokens, capacity, policy, state } = input
-  // A share is a share OF a window: with no advertised capacity there is no
-  // denominator, and no reminder is fabricated from a single figure.
-  if (capacity === undefined || capacity <= 0) return undefined
-  // Exactly the share is not more than the share.
-  if (estimatedTokens <= capacity * policy.share) return undefined
-  if (sameStepCursor(state.pressureReminder, state.cursor)) return undefined
+  const report = oversizedReport(input)
+  if (report === undefined) return undefined
+  if (sameStepCursor(input.state.pressureReminder, input.state.cursor)) return undefined
   return {
-    text: systemReminderFrame(
-      renderOversizedResultReminderBody({ toolName, estimatedTokens, capacity, share: policy.share }),
-    ),
-    summary: oversizedResultSummary(toolName, estimatedTokens, capacity),
+    text: systemReminderFrame(renderOversizedResultReminderBody(report)),
+    summary: oversizedResultSummary(report),
   }
+}
+
+/**
+ * The report one priced result is owed, if any.
+ *
+ * The fixed form's threshold is an absolute count, so the rule needs no
+ * advertised capacity and does not move when the route's window does; a window
+ * smaller than the threshold changes nothing either. The share form is a share
+ * OF a window: with no advertised capacity — or a nonsensical one — there is no
+ * denominator, and no report is fabricated from a single figure. In both forms
+ * exactly the trigger is not over it.
+ * @param input - the tool, the priced result, the capacity, the policy and the folded step facts.
+ * @returns the report, or `undefined` when the result is not over the trigger.
+ */
+function oversizedReport(input: OversizedResultReminderInput): OversizedReport | undefined {
+  const { toolName, estimatedTokens, capacity, policy } = input
+  if (policy.mode === 'tokens') {
+    if (estimatedTokens <= policy.tokens) return undefined
+    return { kind: 'tokens', toolName, estimatedTokens, tokens: policy.tokens, capacity }
+  }
+  if (capacity === undefined || capacity <= 0) return undefined
+  if (estimatedTokens <= capacity * policy.share) return undefined
+  return { kind: 'share', toolName, estimatedTokens, share: policy.share, capacity }
 }
 
 /**
@@ -450,42 +562,69 @@ export function oversizedResultReminderMessage(reminder: OversizedResultReminder
 const OVERSIZED_RESULT_BASIS =
   'The figure prices the raw dispatch result, before the tool’s own finalization, so a tool that shrinks its output may be reported larger than what the model received.'
 
-/** The facts one oversized reminder's body states, before anything derivable is derived. */
-interface OversizedResultBodyFacts {
-  /** The dispatched tool's name. */
-  readonly toolName: string
-  /** The price the harness put on the raw result. */
-  readonly estimatedTokens: number
-  /** The route's advertised context window. */
-  readonly capacity: number
-  /** The configured share of that window. */
-  readonly share: number
+/**
+ * The trigger in force, named the way a report names it: the threshold the
+ * result is over, or the share of the window it is over.
+ * @param report - the decided report.
+ * @returns the trigger's name, escaped for interpolation into the frame.
+ */
+function oversizedTriggerName(report: OversizedReport): string {
+  return report.kind === 'tokens'
+    ? `${escapeXml(String(report.tokens))}-token threshold`
+    : `${percent(report.share)} share`
 }
 
 /**
- * Render the model-facing body of one oversized-result reminder.
+ * The price as a share of one advertised window.
+ * @param estimatedTokens - the price the harness put on the raw result.
+ * @param capacity - the window the route advertised.
+ * @returns the clause, with every interpolated value escaped.
+ */
+function shareOfWindow(estimatedTokens: number, capacity: number): string {
+  return `${percent(estimatedTokens / capacity)} of the current route's ${escapeXml(String(capacity))}-token context window`
+}
+
+/**
+ * Render the model-facing body of one oversized-result report.
  *
  * It names the tool and the sizes only — never a byte of the result itself. A
  * result is arbitrary content, and a reminder that quoted it would put the very
- * payload the report is about back into the context.
- * @param facts - the tool, the priced result, the capacity and the share in force.
+ * payload the report is about back into the context. The trigger is always
+ * stated, in the units of the form in force; the price as a share of the window
+ * trails it whenever a route has advertised one, and a route that has not gives
+ * way to a plain statement that capacity is not known, because a ratio against a
+ * window nobody advertised is never fabricated.
+ * @param report - the decided report.
  * @returns the body, with every interpolated value escaped.
  */
-function renderOversizedResultReminderBody(facts: OversizedResultBodyFacts): string {
-  const { toolName, estimatedTokens, capacity, share } = facts
-  return [
-    `Context reminder: one tool result is oversized — the \`${escapeXml(toolName)}\` result prices at an estimated ${escapeXml(String(estimatedTokens))} tokens, ${percent(estimatedTokens / capacity)} of the current route's ${escapeXml(String(capacity))}-token context window and above the configured ${percent(share)} share.`,
-    OVERSIZED_RESULT_BASIS,
-  ].join('\n')
+function renderOversizedResultReminderBody(report: OversizedReport): string {
+  const { toolName, estimatedTokens } = report
+  const lead = `Context reminder: one tool result is oversized — the \`${escapeXml(toolName)}\` result prices at an estimated ${escapeXml(String(estimatedTokens))} tokens`
+  const account =
+    report.kind === 'share'
+      ? // The share form is unchanged, and its eligibility required the window it
+        // is stated against, so this clause always has the figure a route gave.
+        `${shareOfWindow(estimatedTokens, report.capacity)} and above the configured ${oversizedTriggerName(report)}`
+      : report.capacity === undefined || report.capacity <= 0
+        ? `above the configured ${oversizedTriggerName(report)}; the current route's context capacity is not known`
+        : `above the configured ${oversizedTriggerName(report)}, ${shareOfWindow(estimatedTokens, report.capacity)}`
+  return [`${lead}, ${account}.`, OVERSIZED_RESULT_BASIS].join('\n')
 }
 
 /**
  * The one-line account a collapsed notice row shows.
- * @param toolName - the dispatched tool's name.
- * @param estimatedTokens - the price the harness put on the raw result.
- * @param capacity - the route's advertised context window.
+ *
+ * It names the tool, the estimated price and the figure the trigger in force is
+ * stated in — the threshold under the fixed form, the window a share is a share
+ * of under the share form — so the row says what the report is about without
+ * being expanded.
+ * @param report - the decided report.
  * @returns the account, ellipsized by the harness's own bound when too long.
  */
-function oversizedResultSummary(toolName: string, estimatedTokens: number, capacity: number): string {
-  return boundContextSummary(`${toolName}: about ${estimatedTokens} tokens of ${capacity}`)
+function oversizedResultSummary(report: OversizedReport): string {
+  return report.kind === 'tokens'
+    ? boundContextSummary(
+        `${report.toolName}: about ${report.estimatedTokens} tokens, above the configured ${oversizedTriggerName(report)}`,
+      )
+    : boundContextSummary(`${report.toolName}: about ${report.estimatedTokens} tokens of ${report.capacity}`)
 }

@@ -40,6 +40,11 @@ export interface ScriptedAdapterOptions {
   readonly callTool?: string
   /** The 1-based request indexes that ask for {@link callTool}; every other request answers in text. */
   readonly toolCallOn?: readonly number[]
+  /**
+   * The 1-based request indexes that ask for {@link callTool} **twice in one
+   * response**, so one step dispatches two calls and commits two results.
+   */
+  readonly twoToolCallsOn?: readonly number[]
 }
 
 /**
@@ -89,20 +94,30 @@ export class ScriptedAdapter extends LlmAdapter {
       yield { type: 'finish', reason: { kind: 'tool-calls' } }
       return
     }
-    const { callTool, toolCallOn } = this.options
-    if (callTool !== undefined && (toolCallOn ?? []).includes(this.requests.length)) {
-      // The request index is this call's identity, so two calls in one session
-      // are two distinct executions with two distinct results.
-      yield { type: 'block-start', index: 0, blockType: 'tool-call' }
-      yield {
-        type: 'block-end',
-        index: 0,
-        block: {
-          type: 'tool-call',
-          id: ToolCallId(`call-${this.requests.length}`),
-          name: callTool,
-          arguments: '{}',
-        },
+    const { callTool, toolCallOn, twoToolCallsOn } = this.options
+    const calls =
+      (twoToolCallsOn ?? []).includes(this.requests.length)
+        ? 2
+        : (toolCallOn ?? []).includes(this.requests.length)
+          ? 1
+          : 0
+    if (callTool !== undefined && calls > 0) {
+      for (let index = 0; index < calls; index += 1) {
+        // The request index is this call's identity, so two calls in one session
+        // — and two calls in one step — are distinct executions with distinct
+        // results. A lone call keeps its unqualified id.
+        const id = calls === 1 ? `call-${this.requests.length}` : `call-${this.requests.length}-${index + 1}`
+        yield { type: 'block-start', index, blockType: 'tool-call' }
+        yield {
+          type: 'block-end',
+          index,
+          block: {
+            type: 'tool-call',
+            id: ToolCallId(id),
+            name: callTool,
+            arguments: '{}',
+          },
+        }
       }
       yield { type: 'usage', usage }
       yield { type: 'finish', reason: { kind: 'tool-calls' } }

@@ -19,10 +19,11 @@
         statement:
           enabled: true
         # Advisory reminders: the per-epoch pressure tiers and the
-        # oversized-result rule that reports one raw tool result above its share.
+        # oversized-result rule that reports one raw tool result above its
+        # threshold. The fixed token threshold is the form in force.
         # The tier ratios, the assumed compaction threshold and the oversized
-        # share all keep their schema defaults: 0.60 and 0.75 for the tiers,
-        # 0.80 for the threshold the headroom wording assumes, and 0.10 for the
-        # share of the window one result may occupy unreported.
+        # threshold all keep their schema defaults: 0.60 and 0.75 for the tiers,
+        # 0.80 for the threshold the headroom wording assumes, and 8000
+        # estimated tokens for the one raw result a step may return unreported.
         reminders:
           enabled: true

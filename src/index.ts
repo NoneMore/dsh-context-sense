@@ -20,7 +20,8 @@ import { installOversizedResultReminders } from './oversized-reminders.js'
 import { createContextReadingTool } from './reading-tool.js'
 import {
   DEFAULT_COMPACTION_THRESHOLD_RATIO,
-  DEFAULT_OVERSIZED_RESULT_SHARE,
+  DEFAULT_OVERSIZED_RESULT_MODE,
+  DEFAULT_OVERSIZED_RESULT_TOKENS,
   DEFAULT_REMINDER_TIERS,
   resolveOversizedResultPolicy,
   resolveReminderPolicy,
@@ -47,6 +48,40 @@ export const name = PLUGIN_NAME
  * this plugin pending at load rather than degrade silently later.
  */
 export const inject = ['agents', 'sessionProjections', 'systemPrompt', 'tools', 'tokenMeter']
+
+/**
+ * The oversized-result block's declared schema.
+ *
+ * The two numeric fields carry no default: a form's field is absent whenever its
+ * form is not the one in force, which keeps "was it configured?" answerable and
+ * makes a configuration naming the other form's field a load-time refusal rather
+ * than a value silently ignored.
+ */
+const OversizedResultConfigSchema = z.object({
+  /** Report one raw tool result that exceeds the trigger below. Independent of the tier flag. */
+  enabled: z.boolean().default(true),
+  /** The trigger's form: the fixed token threshold, or the result share. */
+  mode: z.union([z.const('tokens'), z.const('share')]).default(DEFAULT_OVERSIZED_RESULT_MODE),
+  /** The fixed token threshold, in estimated tokens. Only with `mode: 'tokens'`. */
+  tokens: z.number(),
+  /** The share of the route's capacity one raw tool result may occupy. Only with `mode: 'share'`. */
+  share: z.number(),
+})
+
+/**
+ * The block's whole-value default: the form in force — enabled, the fixed form,
+ * its threshold — and nothing of the other form, because a default that also
+ * named a share would make every configuration self-contradictory and the
+ * mutual-exclusion check meaningless.
+ *
+ * Schemastery types every declared key of an object as present in its output, so
+ * a default that deliberately omits one is asserted rather than described.
+ */
+const OVERSIZED_RESULT_DEFAULTS = {
+  enabled: true,
+  mode: DEFAULT_OVERSIZED_RESULT_MODE,
+  tokens: DEFAULT_OVERSIZED_RESULT_TOKENS,
+} as unknown as Schemastery.TypeT<typeof OversizedResultConfigSchema>
 
 /** The declared config schema; the loader row's `config` block validates against it. */
 export const Config = z.object({
@@ -76,22 +111,14 @@ export const Config = z.object({
        * never read as the policy the mounted compaction backend enforces.
        */
       compactionThresholdRatio: z.number().default(DEFAULT_COMPACTION_THRESHOLD_RATIO),
-      oversized: z
-        .object({
-          /** Report one tool result that exceeds the share below. Independent of the tier flag. */
-          enabled: z.boolean().default(true),
-          /** The share of the route's capacity one raw tool result may occupy unreported. */
-          share: z.number().default(DEFAULT_OVERSIZED_RESULT_SHARE),
-        })
-        // Stated in full because an object default is the whole value, not a patch.
-        .default({ enabled: true, share: DEFAULT_OVERSIZED_RESULT_SHARE }),
+      oversized: OversizedResultConfigSchema.default(OVERSIZED_RESULT_DEFAULTS),
     })
     // Stated in full because an object default is the whole value, not a patch.
     .default({
       enabled: true,
       tiers: [...DEFAULT_REMINDER_TIERS],
       compactionThresholdRatio: DEFAULT_COMPACTION_THRESHOLD_RATIO,
-      oversized: { enabled: true, share: DEFAULT_OVERSIZED_RESULT_SHARE },
+      oversized: OVERSIZED_RESULT_DEFAULTS,
     }),
 })
 

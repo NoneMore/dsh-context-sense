@@ -2,10 +2,11 @@
  * The oversized-result reminder, tested as a pure function.
  *
  * The core is a function of the tool's name, the price the harness's own meter
- * put on one raw result, the route's capacity, the configured share and the
- * folded step facts — and of nothing else. It never reads a projection, a
- * meter, a clock or module-level state, so the threshold rule, the
- * one-directional suppression and the frame are testable without a session.
+ * put on one raw result, the route's capacity, the oversized-result trigger in
+ * force and the folded step facts — and of nothing else. It never reads a
+ * projection, a meter, a clock or module-level state, so either form's
+ * eligibility, the one-directional suppression and the frame are testable
+ * without a session.
  *
  * @module test/oversized-reminder
  */
@@ -29,13 +30,19 @@ import {
   stepStart,
 } from './session-events.js'
 
-/** The share one result may occupy in these tests: a tenth of the route's capacity. */
+/** The fixed token threshold these tests decide against. */
+const TOKENS = 1_000
+
+/** The result share these tests decide against when they select the share form. */
 const SHARE = 0.1
 
-/** The policy those tests decide against. */
-const POLICY = resolveOversizedResultPolicy({ share: SHARE })
+/** The fixed form in force: an absolute count, needing no capacity to apply. */
+const FIXED = resolveOversizedResultPolicy({ mode: 'tokens', tokens: TOKENS })
 
-/** The capacity the figures below are formed from. */
+/** The share form, reached only by naming it. */
+const SHARED = resolveOversizedResultPolicy({ mode: 'share', share: SHARE })
+
+/** The capacity a share is formed against, and the window a fixed-form report quotes. */
 const CAPACITY = 10_000
 
 /** The step the result belongs to, in a session that has taken one step. */
@@ -48,35 +55,54 @@ const STEPPED: OversizedSuppressionState = { cursor: CURRENT_STEP, pressureRemin
 function input(overrides: Partial<OversizedResultReminderInput> = {}): OversizedResultReminderInput {
   return {
     toolName: 'bulk_result',
-    // 0.4 of the capacity: four times the share in force.
+    // Four times the fixed threshold, and 40% of the capacity below.
     estimatedTokens: 4_000,
     capacity: CAPACITY,
-    policy: POLICY,
+    policy: FIXED,
     state: STEPPED,
     ...overrides,
   }
 }
 
 describe('oversized-result eligibility', () => {
-  it('reminds when one raw result exceeds the configured share of capacity', () => {
+  it('reminds, under the fixed form, when one raw result exceeds the configured token threshold', () => {
     const reminder = decideOversizedResultReminder(input())
 
     expect(reminder).toBeDefined()
     expect(reminder?.text).toContain('bulk_result')
   })
 
-  it('stays quiet for a result that does not exceed the share, boundary included', () => {
-    // Exactly the share is not more than the share: 0.1 of a 10000-token window
-    // is 1000 tokens, and the rule reports only what exceeds it.
-    expect(decideOversizedResultReminder(input({ estimatedTokens: 1_000 }))).toBeUndefined()
-    expect(decideOversizedResultReminder(input({ estimatedTokens: 999 }))).toBeUndefined()
-    expect(decideOversizedResultReminder(input({ estimatedTokens: 1_001 }))).toBeDefined()
+  it('holds the fixed form to its boundary: exactly the threshold is not over it', () => {
+    expect(decideOversizedResultReminder(input({ estimatedTokens: TOKENS }))).toBeUndefined()
+    expect(decideOversizedResultReminder(input({ estimatedTokens: TOKENS - 1 }))).toBeUndefined()
+    expect(decideOversizedResultReminder(input({ estimatedTokens: TOKENS + 1 }))).toBeDefined()
   })
 
-  it('stays quiet while no recorded route has advertised a capacity', () => {
-    // The share is a share OF a window: with no denominator there is no rule to
-    // apply, however large the result is.
-    expect(decideOversizedResultReminder(input({ capacity: undefined }))).toBeUndefined()
+  it('applies the fixed form with no advertised capacity, and whatever the capacity is', () => {
+    // The point of the form: an absolute count needs no denominator, so a fresh
+    // or unadvertised route is not silently unprotected...
+    expect(decideOversizedResultReminder(input({ capacity: undefined }))).toBeDefined()
+    // ...and a window smaller than the threshold does not change the decision.
+    expect(decideOversizedResultReminder(input({ capacity: 1 }))).toBeDefined()
+  })
+
+  it('reminds, under the share form, when one raw result exceeds the configured share', () => {
+    const reminder = decideOversizedResultReminder(input({ policy: SHARED }))
+
+    expect(reminder).toBeDefined()
+    expect(reminder?.text).toContain('bulk_result')
+  })
+
+  it('holds the share form to its boundary: exactly the share is not over it', () => {
+    expect(decideOversizedResultReminder(input({ policy: SHARED, estimatedTokens: 1_000 }))).toBeUndefined()
+    expect(decideOversizedResultReminder(input({ policy: SHARED, estimatedTokens: 999 }))).toBeUndefined()
+    expect(decideOversizedResultReminder(input({ policy: SHARED, estimatedTokens: 1_001 }))).toBeDefined()
+  })
+
+  it('keeps the share form’s meaning: with no advertised capacity there is no rule to apply', () => {
+    // A share is a share OF a window: with no denominator there is no reminder
+    // to fabricate from a single figure, however large the result is.
+    expect(decideOversizedResultReminder(input({ policy: SHARED, capacity: undefined }))).toBeUndefined()
   })
 })
 
@@ -128,7 +154,7 @@ describe('oversized-result suppression', () => {
 })
 
 describe('the oversized-result reminder frame', () => {
-  it('names the tool and the sizes, and never a payload', () => {
+  it('names the tool, the price and the threshold, and quotes the window it can', () => {
     const reminder = decideOversizedResultReminder(input())!
 
     expect(reminder.text.startsWith(`${SYSTEM_REMINDER_OPEN}\n`)).toBe(true)
@@ -139,13 +165,48 @@ describe('the oversized-result reminder frame', () => {
 
     expect(reminder.text).toContain('`bulk_result`')
     expect(reminder.text).toContain('4000 tokens')
+    expect(reminder.text).toContain('1000-token threshold')
+    // The price as a share of the advertised window, which the fixed form can
+    // still state when a route has advertised one — as a trailing clause after
+    // the threshold the result is over.
     expect(reminder.text).toContain('40%')
     expect(reminder.text).toContain('10000-token context window')
-    expect(reminder.text).toContain('10% share')
+    expect(reminder.text.indexOf('1000-token threshold')).toBeLessThan(
+      reminder.text.indexOf('10000-token context window'),
+    )
     // The basis of the figure, stated so the model is not told the model-facing
     // content was measured when the pre-finalization result was.
     expect(reminder.text).toContain('raw dispatch result')
     expect(reminder.text).toContain('finalization')
+  })
+
+  it('drops the share-of-window clause and says plainly that capacity is not known', () => {
+    const reminder = decideOversizedResultReminder(input({ capacity: undefined }))!
+
+    expect(reminder.text).toContain('`bulk_result`')
+    expect(reminder.text).toContain('4000 tokens')
+    expect(reminder.text).toContain('1000-token threshold')
+    // The clause the fixed form cannot state gives way to the plain statement,
+    // ending the account of the figure before the unchanged basis sentence.
+    expect(reminder.text).toContain("1000-token threshold; the current route's context capacity is not known.")
+    expect(reminder.text).toContain("the current route's context capacity is not known")
+    // A ratio against a window nobody advertised is never fabricated.
+    expect(reminder.text).not.toContain('context window')
+    expect(reminder.text).not.toContain('10000')
+    // The same frame, and the same basis sentence, as the shape above.
+    expect(reminder.text.startsWith(`${SYSTEM_REMINDER_OPEN}\n`)).toBe(true)
+    expect(reminder.text).toContain('raw dispatch result')
+  })
+
+  it('keeps the share form’s body, which always has a window to quote', () => {
+    const reminder = decideOversizedResultReminder(input({ policy: SHARED }))!
+
+    expect(reminder.text).toContain('`bulk_result`')
+    expect(reminder.text).toContain('4000 tokens')
+    expect(reminder.text).toContain('40%')
+    expect(reminder.text).toContain('10000-token context window')
+    expect(reminder.text).toContain('10% share')
+    expect(reminder.text).toContain('raw dispatch result')
   })
 
   it('escapes a tool name that would otherwise close the frame', () => {
@@ -165,6 +226,11 @@ describe('the oversized-result reminder frame', () => {
     // The bound is the harness's, not this plugin's: a notice row is collapsed
     // until expanded, so its summary has to fit one line.
     expect(reminder.summary.length).toBeLessThanOrEqual(CONTEXT_SUMMARY_MAX_CHARS)
+    // The summary names the tool, the price and the threshold, so a collapsed
+    // row still says what the report is about.
+    expect(reminder.summary).toContain('bulk_result')
+    expect(reminder.summary).toContain('4000')
+    expect(reminder.summary).toContain('1000-token threshold')
     expect(message.content).toEqual([{ type: 'text', text: reminder.text }])
 
     // A tool name with no length of its own is what makes the bound bite: the
@@ -173,16 +239,62 @@ describe('the oversized-result reminder frame', () => {
     expect(long.summary.length).toBeLessThanOrEqual(CONTEXT_SUMMARY_MAX_CHARS)
     expect(long.summary.endsWith('…')).toBe(true)
   })
+
+  it('names the window instead of the threshold in the share form’s summary', () => {
+    const reminder = decideOversizedResultReminder(input({ policy: SHARED }))!
+
+    expect(reminder.summary).toContain('bulk_result')
+    expect(reminder.summary).toContain('4000')
+    expect(reminder.summary).toContain('10000')
+  })
 })
 
 describe('oversized-result policy validation', () => {
-  it('keeps the configured share exactly as configured', () => {
-    expect(resolveOversizedResultPolicy({ share: 0.25 })).toEqual({ share: 0.25 })
+  it('defaults to the fixed form, and its own threshold, when the block names neither', () => {
+    // 8,000 estimated tokens: an absolute count, so a deployment gets a usable
+    // threshold without configuring anything.
+    expect(resolveOversizedResultPolicy({})).toEqual({ mode: 'tokens', tokens: 8_000 })
+    expect(resolveOversizedResultPolicy({ enabled: true })).toEqual({ mode: 'tokens', tokens: 8_000 })
+  })
+
+  it('keeps a configured threshold exactly as configured', () => {
+    expect(resolveOversizedResultPolicy({ mode: 'tokens', tokens: 4_096 })).toEqual({ mode: 'tokens', tokens: 4_096 })
+    // A threshold of one token is odd but usable, and is never replaced.
+    expect(resolveOversizedResultPolicy({ mode: 'tokens', tokens: 1 })).toEqual({ mode: 'tokens', tokens: 1 })
+  })
+
+  it('reaches the share form’s own default only by selecting the form', () => {
+    expect(resolveOversizedResultPolicy({ mode: 'share' })).toEqual({ mode: 'share', share: 0.1 })
+  })
+
+  it('keeps a configured share exactly as configured', () => {
+    expect(resolveOversizedResultPolicy({ mode: 'share', share: 0.25 })).toEqual({ mode: 'share', share: 0.25 })
+  })
+
+  it('refuses the field the form in force does not name', () => {
+    // The form in force is the fixed one by default, so a leftover share is a
+    // configuration the operator must re-choose rather than one silently kept.
+    expect(() => resolveOversizedResultPolicy({ share: 0.25 })).toThrow(/oversized\.share/)
+    expect(() => resolveOversizedResultPolicy({ mode: 'tokens', tokens: 4_000, share: 0.25 })).toThrow(
+      /oversized\.share/,
+    )
+    // ...and the fixed form's field is refused just as loudly when the share is
+    // the form in force.
+    expect(() => resolveOversizedResultPolicy({ mode: 'share', tokens: 4_000 })).toThrow(/oversized\.tokens/)
+    expect(() => resolveOversizedResultPolicy({ mode: 'share', share: 0.25, tokens: 4_000 })).toThrow(
+      /oversized\.tokens/,
+    )
+  })
+
+  it('refuses a threshold that is not a positive integer', () => {
+    for (const tokens of [0, -1, -8_000, 0.5, 4_000.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => resolveOversizedResultPolicy({ mode: 'tokens', tokens })).toThrow(/oversized\.tokens/)
+    }
   })
 
   it('refuses a share outside the open unit interval', () => {
     for (const share of [0, 1, -0.1, 1.2, Number.NaN, Number.POSITIVE_INFINITY]) {
-      expect(() => resolveOversizedResultPolicy({ share })).toThrow(/oversized\.share/)
+      expect(() => resolveOversizedResultPolicy({ mode: 'share', share })).toThrow(/oversized\.share/)
     }
   })
 })

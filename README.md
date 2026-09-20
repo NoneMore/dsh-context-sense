@@ -10,7 +10,8 @@ A DeepSeek Harness bundle that gives the model explicit awareness of its own con
 - Registers a parameterless `context_reading` tool for a source-attributed live reading.
 - Reconstructs route coherence and reminder state from durable session events, including fork boundaries.
 - Emits once-per-epoch advisory reminders at configurable pressure tiers.
-- Reports a single raw tool result when its estimated size exceeds a configured share of the route capacity.
+- Reports a single raw tool result when its estimated size exceeds a configured threshold: the absolute fixed token
+  threshold by default, or a share of the route capacity when that form is selected.
 - Remains append-only: it does not rewrite, truncate, reorder, or remove existing conversation history.
 
 The plugin treats missing measurements as unknown rather than inventing numbers. A pressure/capacity ratio is reported only when both figures are known and the plugin can show that they belong to the same resolved route.
@@ -70,8 +71,14 @@ reminders:
   compactionThresholdRatio: 0.80
   oversized:
     enabled: true
-    share: 0.10
+    mode: tokens
+    tokens: 8000
 ```
+
+The oversized-result trigger takes exactly one of two forms: `tokens`, the fixed token threshold in estimated
+tokens, or `share`, a ratio in `(0, 1)` of the route capacity. The field the form in force does not name must be
+absent, so a configuration carrying both, or carrying a `share` while `mode` defaults to `tokens`, fails plugin load
+rather than running with a trigger its operator did not choose.
 
 A profile can override that row through its own `cordis.patch.yml`. DeepSeek Harness patch layers replace a row's complete `config` value rather than deep-merging individual keys, so restate every setting you want to keep when overriding the row.
 
