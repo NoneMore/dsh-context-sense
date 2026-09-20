@@ -2,6 +2,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
 
 import * as ContextSense from '../lib/index.js'
+import { CONTEXT_SENSE_KEY } from '../lib/session-state.js'
 import { CAPACITY_SECTION_NAME } from '../lib/statement.js'
 import { assembleFor, capacitySections } from './capacity-statement.js'
 import { minimalContextFixture } from './minimal-context.js'
@@ -122,5 +123,21 @@ describe('capacity statement registration', () => {
     expect(await capacitySections(ctx, agent)).toHaveLength(0)
     // Unloading this plugin must not disturb the rest of the composition.
     expect((await assembleFor(ctx, agent)).sections.length).toBeGreaterThan(0)
+  })
+
+  it('keeps its session memory host-only, and removes the unit when the plugin unloads', async () => {
+    const { ctx, harness } = await boot()
+    const agent = await harness.create(SessionId('agent-1'))
+    const fiber = ctx.plugin(ContextSense)
+    await fiber
+
+    // The unit exists for the host...
+    expect(ctx.sessionProjections.stateOf(agent.session, CONTEXT_SENSE_KEY)).toBeDefined()
+    // ...and is deliberately absent from every client-visible view.
+    expect(Object.keys(ctx.sessionProjections.snapshot(agent.session).values)).not.toContain(CONTEXT_SENSE_KEY)
+
+    await fiber.dispose()
+
+    expect(ctx.sessionProjections.stateOf(agent.session, CONTEXT_SENSE_KEY)).toBeUndefined()
   })
 })

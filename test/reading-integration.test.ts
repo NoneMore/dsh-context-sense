@@ -6,13 +6,17 @@ import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import * as ContextSense from '../lib/index.js'
+import type { ContextReading } from '../lib/reading.js'
 import { CONTEXT_READING_TOOL_NAME } from '../lib/reading-tool.js'
 import { bootMinimalContext, type MinimalContext } from './minimal-context.js'
 import {
   CAPACITY,
   MODEL,
+  OTHER_MODEL,
+  OTHER_PROVIDER,
   PROVIDER,
   READING_CALL_ID,
+  SMALL_CAPACITY,
   ScriptedAdapter,
   takeTurn,
   textOf,
@@ -43,9 +47,9 @@ function invokeReading(ctx: Context, agent: Agent | undefined): Promise<ToolExec
  * @param result - the settled dispatch result.
  * @returns the canonical value.
  */
-function valueOf(result: ToolExecutionResult) {
+function valueOf(result: ToolExecutionResult): ContextReading {
   if (result.isError) throw new Error(`context_reading failed: ${result.error.message}`)
-  return result.value
+  return result.value as unknown as ContextReading
 }
 
 describe('context_reading in a booted agent loop', () => {
@@ -72,12 +76,16 @@ describe('context_reading in a booted agent loop', () => {
     // An unmeasured pressure is never filled in from composition: the line
     // carries no figure at all.
     expect(pressureLine(freshReading)).not.toMatch(/\d/)
+    // Nor is a ratio formed from figures that do not exist yet, so nothing
+    // downstream can derive a reminder tier from this reading.
+    expect(valueOf(fresh).ratio).toBeUndefined()
     // The canonical value carries no figure it did not measure, and the
     // registry accepted it against the declared output schema.
     expect(valueOf(fresh)).toEqual({
       capacity: { known: false, provenance: 'route-metadata' },
       pressure: { state: 'unknown' },
       composition: { known: true, provenance: 'heuristic', systemTokens: 0, toolsTokens: 0, messageTokens: 0 },
+      compaction: { occurredInSession: false, checkpointVisible: false },
     })
 
     // The tool writes nothing: dispatching it leaves the derived history alone.
@@ -92,7 +100,13 @@ describe('context_reading in a booted agent loop', () => {
     expect(reading).toContain(`Capacity (route-metadata): ${CAPACITY} tokens`)
     // The figure is the harness's own numerator, not a recomputation of it.
     expect(reading).toContain(`Pressure (provider-anchored): ${pressureOf(ctx, agent)} tokens`)
-    expect(reading).toMatch(/ratio and remaining room: not available/i)
+    // The route recorded for this session and the route that reported the
+    // sample agree, so the ratio and the remaining room are reported.
+    const value = valueOf(measured)
+    expect(value.pressure.state).toBe('known')
+    expect(value.ratio).toBeCloseTo(pressureOf(ctx, agent)! / CAPACITY, 12)
+    expect(value.remaining).toBe(CAPACITY - pressureOf(ctx, agent)!)
+    expect(reading).toMatch(/Ratio and remaining room: \d+(\.\d)?% of the route's context window/)
   })
 
   it('reports the provider-anchored pressure rather than the composition total', async () => {
@@ -131,6 +145,58 @@ describe('context_reading in a booted agent loop', () => {
     expect(pressureLine(reading)).not.toContain(String(compositionTotal))
   })
 
+  it('reads stale, with no ratio, while a new route has no sample — then reports the ratio again', async () => {
+    booted = await bootMinimalContext()
+    const { ctx, harness } = booted
+    // The first route reports a large prompt, so a naive ratio against the
+    // second route's capacity would look catastrophic rather than merely high.
+    ctx.llm.registerAdapter([PROVIDER], new ScriptedAdapter(CAPACITY, { baseInputTokens: 60_000 }))
+    ctx.llm.registerAdapter([OTHER_PROVIDER], new ScriptedAdapter(SMALL_CAPACITY))
+    await ctx.plugin(ContextSense)
+    const agent = await harness.create(SessionId('agent-1'), { provider: PROVIDER, model: MODEL })
+
+    await takeTurn(agent, 'a turn on the large route')
+
+    // The reading describes committed history, so the window in which the
+    // recorded route has moved and no sample has arrived on the new one is only
+    // observable from inside the request that moves it.
+    const duringSwitch: Promise<ToolExecutionResult>[] = []
+    ctx.on('session/event', (_session, event) => {
+      if (event.type === 'request/context' && event.data.provider === OTHER_PROVIDER) {
+        duringSwitch.push(invokeReading(ctx, agent))
+      }
+    })
+    agent.ctx.on('agent/request', async (_payload, next) => ({
+      ...(await next()),
+      provider: OTHER_PROVIDER,
+      model: OTHER_MODEL,
+    }))
+
+    await takeTurn(agent, 'a turn on the small route')
+
+    expect(duringSwitch).toHaveLength(1)
+    const switched = valueOf(await duringSwitch[0]!)
+    // Capacity is route metadata, so it is already the new route's...
+    expect(switched.capacity).toEqual({ known: true, contextWindow: SMALL_CAPACITY, provenance: 'route-metadata' })
+    // ...while the pressure figure is the one the route the session left reported.
+    expect(switched.pressure.state).toBe('stale')
+    expect(switched.pressure.tokens).toBeGreaterThan(0)
+    // The naive pairing crosses the configured notice tier several times over:
+    // the gate, not the magnitude, is what withholds the ratio — so no tier
+    // decision can follow from this reading.
+    expect(switched.pressure.tokens! / SMALL_CAPACITY).toBeGreaterThan(0.6)
+    expect(switched.ratio).toBeUndefined()
+    expect(switched.remaining).toBeUndefined()
+    expect(textOf((await duringSwitch[0]!).content)).toMatch(/Pressure \(provider-anchored, stale\)/)
+
+    // The ratio returns as soon as the new route reports usage of its own.
+    const settled = valueOf(await invokeReading(ctx, agent))
+    expect(settled.capacity.contextWindow).toBe(SMALL_CAPACITY)
+    expect(settled.pressure.state).toBe('known')
+    expect(settled.ratio).toBeCloseTo(settled.pressure.tokens! / SMALL_CAPACITY, 12)
+    expect(settled.remaining).toBe(SMALL_CAPACITY - settled.pressure.tokens!)
+  })
+
   it('reports unknown rather than failing when the execution has no agent', async () => {
     booted = await bootMinimalContext()
     const { ctx } = booted
@@ -147,6 +213,7 @@ describe('context_reading in a booted agent loop', () => {
       capacity: { known: false, provenance: 'route-metadata' },
       pressure: { state: 'unknown' },
       composition: { known: false, provenance: 'heuristic' },
+      compaction: { occurredInSession: false, checkpointVisible: false },
     })
   })
 })

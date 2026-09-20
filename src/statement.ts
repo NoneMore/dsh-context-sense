@@ -9,6 +9,7 @@
  *
  * @module dsh-context-sense/statement
  */
+import { formatPercent } from './reading.js'
 import { CONTEXT_READING_TOOL_NAME } from './reading-tool.js'
 
 /** The facts the statement states, resolved at each prompt assembly. */
@@ -42,10 +43,11 @@ export const CAPACITY_STATEMENT_ORDER = 100
 export function renderCapacityStatement(input: CapacityStatementInput): string {
   return [
     capacitySentence(input.contextWindow),
-    // Deliberately neutral about which figures the tool reports: this slice's
-    // reading reports pressure and composition but not yet the ratio or the
-    // remaining room, so naming them here would promise the model a figure the
-    // tool refuses. The tool's own description carries that detail.
+    // Deliberately neutral about which figures the tool reports. The reading
+    // gives a ratio and a remaining room only when the pressure figure is
+    // confirmed for the route, and says `unknown` or `stale` otherwise, so
+    // enumerating figures here would promise the model numbers this session may
+    // not have. The tool's own description carries that detail.
     `Call the \`${CONTEXT_READING_TOOL_NAME}\` tool at any time for a live, source-attributed reading of this session's context.`,
     reminderSentence(input.reminderTiers),
   ].join('\n')
@@ -78,16 +80,6 @@ function capacitySentence(contextWindow: number | undefined): string {
  * @returns one sentence of the statement.
  */
 function reminderSentence(reminderTiers: readonly number[]): string {
-  const tiers = reminderTiers.map(formatTier).join(' and ')
+  const tiers = reminderTiers.map(formatPercent).join(' and ')
   return `Advisory context reminders arrive at ${tiers} of the context window. A reminder describes committed history rather than the request being assembled, and the threshold it names is an assumed policy value, not a reading of the mounted compaction policy.`
-}
-
-/**
- * Render one tier ratio as a percentage, keeping at most one decimal so a
- * configured `0.755` still reads as the ratio it is.
- * @param ratio - a tier ratio as a fraction of the context window.
- * @returns the percentage without its sign, e.g. `60%`.
- */
-function formatTier(ratio: number): string {
-  return `${Number((ratio * 100).toFixed(1))}%`
 }

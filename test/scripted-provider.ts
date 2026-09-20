@@ -17,6 +17,12 @@ export const PROVIDER = 'scripted'
 export const MODEL = 'scripted-model'
 /** The capacity the scripted route advertises, which the harness records as route metadata. */
 export const CAPACITY = 131_072
+/** A second registered route, so a test can move a session from one capacity to another. */
+export const OTHER_PROVIDER = 'scripted-small'
+/** The model id the second route resolves. */
+export const OTHER_MODEL = 'scripted-small-model'
+/** The capacity the second route advertises, small enough that a stale sample would look dire. */
+export const SMALL_CAPACITY = 8_192
 /** The prompt size the scripted provider reports for a request with no messages. */
 export const BASE_INPUT_TOKENS = 100
 /** The prompt size the scripted provider adds per message, so pressure moves with the surface. */
@@ -28,6 +34,8 @@ export const READING_CALL_ID = 'call-1'
 export interface ScriptedAdapterOptions {
   /** Ask for one `context_reading` call on the first request, then answer in text. */
   readonly askForReading?: boolean
+  /** The prompt size reported for a request with no messages; defaults to {@link BASE_INPUT_TOKENS}. */
+  readonly baseInputTokens?: number
 }
 
 /**
@@ -57,7 +65,8 @@ export class ScriptedAdapter extends LlmAdapter {
 
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests.push(options)
-    const inputTokens = BASE_INPUT_TOKENS + TOKENS_PER_MESSAGE * options.messages.length
+    const base = this.options.baseInputTokens ?? BASE_INPUT_TOKENS
+    const inputTokens = base + TOKENS_PER_MESSAGE * options.messages.length
     const usage = { inputTokens, outputTokens: 2, totalTokens: inputTokens + 2 }
     if (this.options.askForReading && this.requests.length === 1) {
       yield { type: 'block-start', index: 0, blockType: 'tool-call' }

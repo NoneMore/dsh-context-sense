@@ -16,6 +16,7 @@ import type { SessionProjectionRegistry } from '@deepseek-ai/dsh-session-project
 import { defineTool, type ToolDefinition, type ValueSchemaSpec } from '@deepseek-ai/dsh-tools'
 
 import { buildContextReading, renderContextReading, type ContextReading } from './reading.js'
+import { CONTEXT_SENSE_KEY, hasVisibleCheckpoint, isSampleAttributedTo } from './session-state.js'
 
 /** The tool's model-facing name. Distinct from every built-in tool name. */
 export const CONTEXT_READING_TOOL_NAME = 'context_reading'
@@ -63,8 +64,9 @@ const CONTEXT_READING_SCHEMA = {
         state: {
           type: 'string',
           required: true,
-          enum: ['known', 'unknown'],
-          description: 'unknown means no provider has reported usage for this session yet.',
+          enum: ['known', 'unknown', 'stale'],
+          description:
+            'unknown means no provider has reported usage for this session yet; stale means a real sample exists but is not confirmed for the route the capacity belongs to.',
         },
         tokens: {
           type: 'integer',
@@ -78,6 +80,16 @@ const CONTEXT_READING_SCHEMA = {
             'Present only alongside a figure: the figure is anchored to a provider-reported usage sample, never derived from composition.',
         },
       },
+    },
+    ratio: {
+      type: 'number',
+      description:
+        'Context pressure as a fraction of the route context window. Present only when both figures are known and confirmed to belong to the same route.',
+    },
+    remaining: {
+      type: 'integer',
+      description:
+        'Tokens the route still has room for: capacity minus pressure. Present exactly when ratio is; negative means the projected request exceeds the capacity.',
     },
     composition: {
       type: 'object',
@@ -100,14 +112,33 @@ const CONTEXT_READING_SCHEMA = {
         },
       },
     },
+    compaction: {
+      type: 'object',
+      additionalProperties: false,
+      required: true,
+      properties: {
+        occurredInSession: {
+          type: 'boolean',
+          required: true,
+          description: "Whether a summary or prune compaction event appears in this session's own history.",
+        },
+        checkpointVisible: {
+          type: 'boolean',
+          required: true,
+          description:
+            "Whether a compaction checkpoint is part of the model-visible surface. A forked session can send its parent's checkpoint without having compacted anything itself.",
+        },
+      },
+    },
   },
 } as const satisfies ValueSchemaSpec
 
 /** The tool's model-facing description: what it reports, and what it refuses to claim. */
 const CONTEXT_READING_DESCRIPTION = [
-  "Read this session's context window: how much capacity the current route has, what the harness projects the next request will cost, and how the surface divides between system prompt, tool definitions and conversation messages.",
-  "Every figure states its source. An unmeasured figure reads as unknown rather than being estimated, and the composition figures are the harness's own approximation — not a total, and not expected to sum to pressure.",
-  'The pressure ratio and the remaining room are reported as unavailable, because this reading does not establish that the pressure figure and the capacity belong to the same route.',
+  "Read this session's context window: how much capacity the current route has, what the harness projects the next request will cost, how that compares with the capacity, and how the surface divides between system prompt, tool definitions and conversation messages.",
+  'Every figure states its source. An unmeasured figure reads as unknown rather than being estimated, and the composition figures are the harness’s own approximation — not a total, and not expected to sum to pressure.',
+  'The ratio and the remaining room are reported only when the pressure figure and the capacity are both known and confirmed to belong to the same route; otherwise the pressure reads as stale or unknown and neither figure is computed.',
+  'The reading also says separately whether a compaction happened in this session and whether a compaction checkpoint is currently part of the model-visible surface.',
   'Takes no arguments and writes nothing to the conversation.',
 ].join(' ')
 
@@ -138,21 +169,39 @@ export function createContextReadingTool(projections: SessionProjectionRegistry)
  * reading describes the session at the moment the model asked, and an
  * execution with no owning agent has no session to describe.
  * @param agent - the agent the call runs on behalf of, when there is one.
- * @param projections - the registry providing pressure and composition.
+ * @param projections - the registry providing pressure, composition and this plugin's own memory.
  * @returns the attributed reading; an agent-less execution reads as unknown.
  */
 function readLiveContext(agent: Agent | undefined, projections: SessionProjectionRegistry): ContextReading {
-  if (agent === undefined) return buildContextReading({})
+  if (agent === undefined) {
+    // No session means no surface and no own history, so both compaction facts
+    // are plainly false rather than unknown.
+    return buildContextReading({
+      routeCoherent: false,
+      compaction: { occurredInSession: false, checkpointVisible: false },
+    })
+  }
   const session: Session = agent.session
   const { contextPressure, contextBreakdown } = projections.snapshot(session, [
     'contextPressure',
     'contextBreakdown',
   ]).values
+  const state = projections.stateOf(session, CONTEXT_SENSE_KEY)
+  // The newest route the harness recorded, which is the same route metadata the
+  // standing capacity statement is built from.
+  const contextWindow = session.requestContext()
   return buildContextReading({
-    // The newest route the harness recorded, which is the same route metadata
-    // the standing capacity statement is built from.
-    contextWindow: session.requestContext()?.contextWindow,
+    contextWindow: contextWindow?.contextWindow,
     pressure: contextPressure,
     composition: contextBreakdown,
+    // Coherence and the compaction facts come from this plugin's own durable
+    // memory, never from a comparison made up at read time. The route the gate
+    // tests is the capacity's own route, so the ratio pairs the two figures the
+    // model is actually being shown.
+    routeCoherent: state !== undefined && isSampleAttributedTo(state, contextWindow),
+    compaction: {
+      occurredInSession: state?.compactedInSession ?? false,
+      checkpointVisible: state !== undefined && hasVisibleCheckpoint(state),
+    },
   })
 }

@@ -1,11 +1,11 @@
 /**
  * Context Sense: give the model awareness of its own context window.
  *
- * This slice contributes two things: a standing system-prompt statement,
- * registered once per agent, of how much room the current route allows — or a
- * plain statement that capacity is not yet known — and the parameterless
- * `context_reading` tool, which reports a source-attributed reading of the
- * live session on demand.
+ * This plugin contributes a standing system-prompt statement, registered once
+ * per agent, of how much room the current route allows — or a plain statement
+ * that capacity is not yet known — the parameterless `context_reading` tool,
+ * which reports a source-attributed reading of the live session on demand, and
+ * its own durable, replayable memory of the session's model-visible surface.
  *
  * @module dsh-context-sense
  */
@@ -13,21 +13,28 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import z from '@deepseek-ai/schemastery'
 
+import { PLUGIN_NAME } from './identity.js'
 import { createContextReadingTool } from './reading-tool.js'
+import { contextSenseProjection } from './session-state.js'
 import { CAPACITY_SECTION_NAME, CAPACITY_STATEMENT_ORDER, renderCapacityStatement } from './statement.js'
 
-/** The plugin's identity, used for attribution and as its name in diagnostics. */
-export const name = 'context-sense'
+/**
+ * The plugin's identity, used for attribution and as its name in diagnostics.
+ * Every message the plugin authors carries it, which is also how the fold
+ * recognizes its own reminders.
+ */
+export const name = PLUGIN_NAME
 
 /**
  * The services this plugin requires a composition to mount.
  *
- * This slice contributes the capacity statement, which reads `agents` and
- * `systemPrompt`, and the `context_reading` tool, which reads `tools` and
- * `sessionProjections`. `tokenMeter` is named because the spec fixes ONE
- * load-time contract for the whole first version — the oversized-result rule is
- * the later slice that reads it — and a composition missing any of them should
- * leave this plugin pending at load rather than degrade silently later.
+ * The capacity statement reads `agents` and `systemPrompt`; the
+ * `context_reading` tool reads `tools` and this plugin's own memory in
+ * `sessionProjections`, which is also where that memory is registered.
+ * `tokenMeter` is named because the spec fixes ONE load-time contract for the
+ * whole first version — the oversized-result rule is the later slice that reads
+ * it — and a composition missing any of them should leave this plugin pending
+ * at load rather than degrade silently later.
  */
 export const inject = ['agents', 'sessionProjections', 'systemPrompt', 'tools', 'tokenMeter']
 
@@ -60,6 +67,12 @@ export type ContextSenseConfig = Schemastery.TypeT<typeof Config>
  * @param config - validated plugin config.
  */
 export function apply(ctx: Context, config: ContextSenseConfig): void {
+  // Registered first and unconditionally: the surface memory is the plugin's
+  // own durable state, and the tool's reading is one of the faces it has.
+  // Registration is an effect on this plugin's fiber, so unloading the plugin
+  // removes the unit along with everything else it contributed.
+  ctx.sessionProjections.register(contextSenseProjection)
+
   // The statement and the tool are independently switchable: a deployment may
   // want the standing statement without a tool, or the reverse.
   if (config.statement.enabled) installCapacityStatements(ctx, config.reminderTiers)
