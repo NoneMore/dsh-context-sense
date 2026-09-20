@@ -18,8 +18,11 @@
         # The standing capacity statement in each agent's system prompt.
         statement:
           enabled: true
-        # Advisory pressure-tier reminders. The tier ratios and the assumed
-        # compaction threshold keep their schema defaults: 0.60 and 0.75 for the
-        # tiers, 0.80 for the threshold the headroom wording assumes.
+        # Advisory reminders: the per-epoch pressure tiers and the
+        # oversized-result rule that reports one raw tool result above its share.
+        # The tier ratios, the assumed compaction threshold and the oversized
+        # share all keep their schema defaults: 0.60 and 0.75 for the tiers,
+        # 0.80 for the threshold the headroom wording assumes, and 0.10 for the
+        # share of the window one result may occupy unreported.
         reminders:
           enabled: true

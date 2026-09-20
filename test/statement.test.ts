@@ -43,7 +43,7 @@ describe('capacity statement text', () => {
     expect(text).toContain('assumed policy value')
   })
 
-  it('says plainly that no reminder will arrive when no tier is configured', () => {
+  it('says plainly that no tier reminder will arrive when no tier is configured', () => {
     // An empty tier list is a valid configuration — the rules constrain each
     // tier, not the count — so the statement must still read as a sentence
     // rather than as a list of nothing.
@@ -51,5 +51,9 @@ describe('capacity statement text', () => {
 
     expect(text).toContain('No advisory context reminder tiers are configured')
     expect(text).not.toContain('arrive at  of')
+    // It says no TIER reminder will interrupt: the oversized-result rule is a
+    // separate rule with its own flag, so a claim of silence would be a promise
+    // this plugin cannot keep.
+    expect(text).toContain('no tier reminder will interrupt a step')
   })
 })

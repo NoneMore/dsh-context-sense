@@ -9,7 +9,6 @@
  *
  * @module test/reminder
  */
-import { SessionLogOffset, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -22,22 +21,17 @@ import {
   tierReminderMessage,
   type TierFiringState,
 } from '../lib/reminder.js'
-import {
-  applyContextSenseEvent,
-  initContextSenseState,
-  isSampleAttributedTo,
-  type ContextSenseState,
-} from '../lib/session-state.js'
+import { isSampleAttributedTo } from '../lib/session-state.js'
 import {
   ROUTE_A,
   ROUTE_B,
   SECOND_TIER_SECTION,
   TIER_SECTION,
   assistantMessage,
+  foldContextSenseEvents as fold,
   pruneCompaction,
   reminderMessage,
   requestContextEvent,
-  sessionHeader,
   stepStart,
   summaryCompaction,
 } from './session-events.js'
@@ -225,14 +219,6 @@ describe('the reminder frame', () => {
     expect(message.content).toEqual([{ type: 'text', text: reminder.text }])
   })
 })
-
-/** Fold a hand-written log from `init`, the same way the projection registry drives the unit. */
-function fold(events: readonly SessionEvent[]): ContextSenseState {
-  return events.reduce(
-    (state, event) => applyContextSenseEvent(state, event),
-    initContextSenseState(sessionHeader(), SessionLogOffset(0)),
-  )
-}
 
 describe('reminder policy validation', () => {
   it('keeps the tiers exactly as configured, and never clamps or reorders them', () => {

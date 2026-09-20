@@ -15,7 +15,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { SessionId, SessionLogOffset, SessionSeq, type Session } from '@deepseek-ai/dsh-session'
+import { SessionId, SessionLogOffset, type Session } from '@deepseek-ai/dsh-session'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import * as ContextSense from '../lib/index.js'
@@ -30,6 +30,7 @@ import {
 import { CAPACITY_SECTION_NAME as CAPACITY_STATEMENT_SECTION } from '../lib/statement.js'
 import { assembleFor, capacitySections } from './capacity-statement.js'
 import { bootMinimalContext, type MinimalContext } from './minimal-context.js'
+import { committedPluginMessages, pluginMessagesInRequest } from './plugin-messages.js'
 import { MODEL, PROVIDER, ScriptedAdapter, takeTurn } from './scripted-provider.js'
 import { pressureOf } from './token-projections.js'
 
@@ -63,23 +64,15 @@ interface CommittedReminder {
 }
 
 /**
- * Every tier reminder this plugin has committed to a session, in log order.
- *
- * The durable log — not the surface — is what a tier's firing is reconstructed
- * from, so a reminder a compaction has since replaced still counts as spoken.
+ * Every tier reminder this plugin has committed to a session, in log order, one
+ * entry per named section.
  * @param session - the session to read.
- * @returns one entry per committed reminder section.
+ * @returns one entry per committed section.
  */
 function committedReminders(session: Session): CommittedReminder[] {
-  const reminders: CommittedReminder[] = []
-  for (let seq = 0; seq < session.seq; seq += 1) {
-    const event = session.eventAt(SessionSeq(seq))
-    if (event?.type !== 'user/message') continue
-    const source = event.data.source
-    if (source.kind !== 'plugin' || source.plugin !== ContextSense.name || source.form !== 'snapshot') continue
-    for (const section of source.sections) reminders.push({ section: section.name, text: section.text })
-  }
-  return reminders
+  return committedPluginMessages(session)
+    .filter((message) => message.form === 'snapshot')
+    .flatMap((message) => message.sections.map((section) => ({ section: section.name, text: section.text })))
 }
 
 /** The section names of every reminder a session has committed, in order. */
@@ -89,11 +82,7 @@ function reminderSections(agent: Agent): string[] {
 
 /** The plugin-attributed messages one assembled request carried to the provider. */
 function remindersInRequest(adapter: ScriptedAdapter, index: number): string[] {
-  const request = adapter.requests[index]
-  if (request === undefined) throw new Error(`the loop assembled no request at index ${index}`)
-  return request.messages
-    .filter((message) => message.source.kind === 'plugin' && message.source.plugin === ContextSense.name)
-    .map((message) => message.content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join(''))
+  return pluginMessagesInRequest(adapter, index)
 }
 
 /** The plugin's own durable memory of one session. */

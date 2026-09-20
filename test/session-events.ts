@@ -5,7 +5,9 @@
  * state their inputs as events rather than going through a live session. Each
  * helper builds one event of the exact shape the harness commits, so a helper
  * that drifts from the real payload fails to compile here rather than silently
- * testing an easier shape.
+ * testing an easier shape. {@link foldContextSenseEvents} is the one driver that
+ * replays a hand-written log through the fold, so every pure test folds the same
+ * way.
  *
  * @module test/session-events
  */
@@ -14,6 +16,7 @@ import { boundContextSummary, createAssistantMessage, createUserMessage, type Co
 import {
   SESSION_FORMAT_VERSION,
   SessionId,
+  SessionLogOffset,
   SessionSeq,
   type SessionEvent,
   type SessionEventMap,
@@ -22,7 +25,12 @@ import {
 } from '@deepseek-ai/dsh-session'
 
 import { name as PLUGIN_NAME } from '../lib/index.js'
-import { pressureTierSectionName } from '../lib/session-state.js'
+import {
+  applyContextSenseEvent,
+  initContextSenseState,
+  pressureTierSectionName,
+  type ContextSenseState,
+} from '../lib/session-state.js'
 
 /** The section name one pressure tier's reminder carries; the fold's key for that tier. */
 export const TIER_SECTION = pressureTierSectionName(0)
@@ -44,6 +52,23 @@ export function usage(inputTokens: number, outputTokens = 7): TokenUsage {
 /** A minimal valid session header, as the projection registry supplies it. */
 export function sessionHeader(id = 'session-1'): SessionHeader {
   return { version: SESSION_FORMAT_VERSION, id: SessionId(id), createdAt: 1_700_000_000_000, isSeeded: false }
+}
+
+/**
+ * Fold a hand-written log from `init`, the way the projection registry drives
+ * the unit on every append.
+ * @param events - the committed events, in log order.
+ * @param inheritedEventCount - the exact fork-inherited prefix length, zero for a session that owns its whole log.
+ * @returns the state covering every event.
+ */
+export function foldContextSenseEvents(
+  events: readonly SessionEvent[],
+  inheritedEventCount = 0,
+): ContextSenseState {
+  return events.reduce(
+    (state, event) => applyContextSenseEvent(state, event),
+    initContextSenseState(sessionHeader(), SessionLogOffset(inheritedEventCount)),
+  )
 }
 
 /**

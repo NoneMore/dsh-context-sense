@@ -38,7 +38,7 @@ export const CAPACITY_STATEMENT_ORDER = 100
 
 /**
  * Render the statement for one agent.
- * @param input - the route capacity and reminder tiers in force.
+ * @param input - the route capacity and the reminder tiers in force.
  * @returns the section text, with no trailing newline.
  */
 export function renderCapacityStatement(input: CapacityStatementInput): string {
@@ -73,20 +73,25 @@ function capacitySentence(contextWindow: number | undefined): string {
  * claim.
  *
  * The ratios come from this plugin's own config — an assumed compaction
- * threshold, in the domain's vocabulary — so a reminder describes committed
+ * threshold, in the domain's vocabulary — so a tier reminder describes committed
  * history rather than the request being assembled, and the threshold it names
  * is an assumption about the deployment, never a reading of the mounted
  * compaction policy.
+ *
+ * Only the tier rule is announced. The oversized-result rule is deliberately not
+ * named: it is a per-result notice that explains itself, and this statement is
+ * the one place the model is told what to expect, so it says what is configured
+ * rather than promising a delivery that may be withheld.
  * @param reminderTiers - configured tier ratios, in ascending order.
  * @returns one sentence of the statement.
  */
 function reminderSentence(reminderTiers: readonly number[]): string {
   if (reminderTiers.length === 0) {
     // An empty list is a valid configuration: the strict rules constrain each
-    // tier, not how many there are, and disabling reminders arrives here too.
-    // Saying so is what keeps the statement a true sentence — and what stops it
-    // promising the model a reminder no step will ever deliver.
-    return 'No advisory context reminder tiers are configured, so no reminder will interrupt a step as this history grows.'
+    // tier, not how many there are, and disabling tier reminders arrives here
+    // too. The sentence names what will not arrive — a TIER reminder — rather
+    // than promising silence, which an oversized-result notice would break.
+    return 'No advisory context reminder tiers are configured, so no tier reminder will interrupt a step as this history grows.'
   }
   const tiers = reminderTiers.map(formatPercent).join(' and ')
   return `Advisory context reminders arrive at ${tiers} of the context window. ${REMINDER_DISCLAIMER}`

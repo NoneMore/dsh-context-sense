@@ -286,7 +286,7 @@ function withOwnHistory(state: ContextSenseState, event: SessionEvent): ContextS
       return state.compactedInSession ? state : { ...state, compactedInSession: true }
     case 'step/start': {
       const cursor: StepCursor = { turn: event.data.turn, step: event.data.step }
-      return sameCursor(state.cursor, cursor) ? state : { ...state, cursor }
+      return sameStepCursor(state.cursor, cursor) ? state : { ...state, cursor }
     }
     case 'user/message':
       return withTierFiring(state, event)
@@ -404,9 +404,20 @@ function sameSample(left: UsageSample, right: UsageSample): boolean {
   return true
 }
 
-/** Whether two step cursors are the same position. */
-function sameCursor(left: StepCursor | null, right: StepCursor): boolean {
-  return left !== null && left.turn === right.turn && left.step === right.step
+/**
+ * Whether two step cursors name the same position.
+ *
+ * The step the last pressure-tier reminder went out at and the step a result
+ * belongs to are compared with this one rule. Two absent positions are
+ * deliberately not the same position: `null === null` would otherwise read as
+ * "the current step" for the very first result of a session, or for a child that
+ * has not started a step of its own.
+ * @param left - one position, or `null` when no such position is recorded.
+ * @param right - the other position, or `null` when none is recorded.
+ * @returns whether both name the same `(turn, step)`.
+ */
+export function sameStepCursor(left: StepCursor | null, right: StepCursor | null): boolean {
+  return left !== null && right !== null && left.turn === right.turn && left.step === right.step
 }
 
 /**

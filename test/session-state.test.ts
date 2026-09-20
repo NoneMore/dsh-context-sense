@@ -9,18 +9,14 @@
  *
  * @module test/session-state
  */
-import { SessionLogOffset, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
 
 import { buildContextReading } from '../lib/reading.js'
 import {
-  applyContextSenseEvent,
   contextSenseStateSchema,
   hasVisibleCheckpoint,
-  initContextSenseState,
   isSampleAttributedTo,
   pressureTierSectionName,
-  type ContextSenseState,
 } from '../lib/session-state.js'
 import {
   ROUTE_A,
@@ -30,24 +26,16 @@ import {
   assistantAttempt,
   assistantMessage,
   compactionBracket,
+  foldContextSenseEvents as fold,
   humanMessage,
   noticeReminder,
   pruneCompaction,
   reminderMessage,
   replacementMessage,
   requestContextEvent,
-  sessionHeader,
   stepStart,
   summaryCompaction,
 } from './session-events.js'
-
-/** Fold a hand-written log from `init` at the supplied fork cut. */
-function fold(events: readonly SessionEvent[], inheritedEventCount = 0): ContextSenseState {
-  return events.reduce(
-    (state, event) => applyContextSenseEvent(state, event),
-    initContextSenseState(sessionHeader(), SessionLogOffset(inheritedEventCount)),
-  )
-}
 
 describe('reminder epoch', () => {
   it('starts at zero and is opened only by a summary compaction', () => {

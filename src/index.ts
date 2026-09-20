@@ -4,9 +4,10 @@
  * This plugin contributes a standing system-prompt statement, registered once
  * per agent, of how much room the current route allows — or a plain statement
  * that capacity is not yet known — the parameterless `context_reading` tool,
- * which reports a source-attributed reading of the live session on demand, an
- * advisory reminder when committed history reaches a configured pressure tier,
- * and its own durable, replayable memory of the session's model-visible surface.
+ * which reports a source-attributed reading of the live session on demand,
+ * advisory reminders when committed history reaches a configured pressure tier
+ * and when one tool result is oversized, and its own durable, replayable memory
+ * of the session's model-visible surface.
  *
  * @module dsh-context-sense
  */
@@ -15,10 +16,13 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import z from '@deepseek-ai/schemastery'
 
 import { PLUGIN_NAME } from './identity.js'
+import { installOversizedResultReminders } from './oversized-reminders.js'
 import { createContextReadingTool } from './reading-tool.js'
 import {
   DEFAULT_COMPACTION_THRESHOLD_RATIO,
+  DEFAULT_OVERSIZED_RESULT_SHARE,
   DEFAULT_REMINDER_TIERS,
+  resolveOversizedResultPolicy,
   resolveReminderPolicy,
 } from './reminder.js'
 import { contextSenseProjection } from './session-state.js'
@@ -37,11 +41,10 @@ export const name = PLUGIN_NAME
  *
  * The capacity statement reads `agents` and `systemPrompt`; the
  * `context_reading` tool reads `tools` and this plugin's own memory in
- * `sessionProjections`, which is also where that memory is registered.
- * `tokenMeter` is named because the spec fixes ONE load-time contract for the
- * whole first version — the oversized-result rule is the later slice that reads
- * it — and a composition missing any of them should leave this plugin pending
- * at load rather than degrade silently later.
+ * `sessionProjections`, which is also where that memory is registered; and the
+ * oversized-result rule reads `tokenMeter`, the one public pricing seam, on the
+ * `tools/post-execute` waterfall. A composition missing any of them should leave
+ * this plugin pending at load rather than degrade silently later.
  */
 export const inject = ['agents', 'sessionProjections', 'systemPrompt', 'tools', 'tokenMeter']
 
@@ -63,7 +66,7 @@ export const Config = z.object({
     .default({ enabled: true }),
   reminders: z
     .object({
-      /** Deliver pressure-tier reminders. Independent of the statement and tool flags. */
+      /** Deliver pressure-tier reminders. Independent of the statement, the tool and the oversized-result rule. */
       enabled: z.boolean().default(true),
       /** Reminder tier ratios, strictly ascending and strictly below the assumed threshold. */
       tiers: z.array(z.number()).default([...DEFAULT_REMINDER_TIERS]),
@@ -73,12 +76,22 @@ export const Config = z.object({
        * never read as the policy the mounted compaction backend enforces.
        */
       compactionThresholdRatio: z.number().default(DEFAULT_COMPACTION_THRESHOLD_RATIO),
+      oversized: z
+        .object({
+          /** Report one tool result that exceeds the share below. Independent of the tier flag. */
+          enabled: z.boolean().default(true),
+          /** The share of the route's capacity one raw tool result may occupy unreported. */
+          share: z.number().default(DEFAULT_OVERSIZED_RESULT_SHARE),
+        })
+        // Stated in full because an object default is the whole value, not a patch.
+        .default({ enabled: true, share: DEFAULT_OVERSIZED_RESULT_SHARE }),
     })
     // Stated in full because an object default is the whole value, not a patch.
     .default({
       enabled: true,
       tiers: [...DEFAULT_REMINDER_TIERS],
       compactionThresholdRatio: DEFAULT_COMPACTION_THRESHOLD_RATIO,
+      oversized: { enabled: true, share: DEFAULT_OVERSIZED_RESULT_SHARE },
     }),
 })
 
@@ -96,6 +109,7 @@ export function apply(ctx: Context, config: ContextSenseConfig): void {
   // clamped into a shape the operator did not ask for, and that holds whether
   // or not the reminders it configures are switched on.
   const policy = resolveReminderPolicy(config.reminders)
+  const oversizedPolicy = resolveOversizedResultPolicy(config.reminders.oversized)
 
   // Registered first and unconditionally: the surface memory is the plugin's
   // own durable state, and the tool's reading and the tier decision are the
@@ -109,12 +123,14 @@ export function apply(ctx: Context, config: ContextSenseConfig): void {
   // that will never come, so the tiers it advertises are the ones in force.
   const announcedTiers = config.reminders.enabled ? config.reminders.tiers : []
 
-  // The statement, the tool and the reminders are independently switchable: a
-  // deployment may want the standing statement without a tool, or the reading
-  // without being interrupted.
+  // The statement, the tool and the two reminder rules are independently
+  // switchable: a deployment may want the standing statement without a tool, or
+  // the reading without being interrupted, or the oversized-result report
+  // without the per-epoch tier signals.
   if (config.statement.enabled) installCapacityStatements(ctx, announcedTiers)
   if (config.tool.enabled) ctx.tools.register(createContextReadingTool(ctx.sessionProjections))
   if (config.reminders.enabled) installTierReminders(ctx, policy)
+  if (config.reminders.oversized.enabled) installOversizedResultReminders(ctx, oversizedPolicy)
 }
 
 /**

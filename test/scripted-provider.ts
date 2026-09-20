@@ -36,6 +36,10 @@ export interface ScriptedAdapterOptions {
   readonly askForReading?: boolean
   /** The prompt size reported for a request with no messages; defaults to {@link BASE_INPUT_TOKENS}. */
   readonly baseInputTokens?: number
+  /** Ask for this tool, so a test can drive the tool pipeline and its waterfalls. */
+  readonly callTool?: string
+  /** The 1-based request indexes that ask for {@link callTool}; every other request answers in text. */
+  readonly toolCallOn?: readonly number[]
 }
 
 /**
@@ -85,6 +89,25 @@ export class ScriptedAdapter extends LlmAdapter {
       yield { type: 'finish', reason: { kind: 'tool-calls' } }
       return
     }
+    const { callTool, toolCallOn } = this.options
+    if (callTool !== undefined && (toolCallOn ?? []).includes(this.requests.length)) {
+      // The request index is this call's identity, so two calls in one session
+      // are two distinct executions with two distinct results.
+      yield { type: 'block-start', index: 0, blockType: 'tool-call' }
+      yield {
+        type: 'block-end',
+        index: 0,
+        block: {
+          type: 'tool-call',
+          id: ToolCallId(`call-${this.requests.length}`),
+          name: callTool,
+          arguments: '{}',
+        },
+      }
+      yield { type: 'usage', usage }
+      yield { type: 'finish', reason: { kind: 'tool-calls' } }
+      return
+    }
     yield { type: 'block-start', index: 0, blockType: 'text' }
     yield { type: 'block-end', index: 0, block: { type: 'text', text: 'acknowledged' } }
     yield { type: 'usage', usage }
@@ -109,6 +132,18 @@ export function systemPromptOf(request: GenerateOptions): string {
 export function toolResults(request: GenerateOptions, toolCallId: string): ContentBlock[] {
   return request.messages.flatMap((message) =>
     message.content.filter((block) => block.type === 'tool-result' && block.toolCallId === toolCallId),
+  )
+}
+
+/**
+ * The text of every tool result one request carried, whatever call each answers.
+ * A test that only cares how large the results were does not need their ids.
+ * @param request - one assembled request.
+ * @returns one entry per tool-result block, in message order.
+ */
+export function toolResultTexts(request: GenerateOptions): string[] {
+  return request.messages.flatMap((message) =>
+    message.content.flatMap((block) => (block.type === 'tool-result' ? [textOf(block.content)] : [])),
   )
 }
 

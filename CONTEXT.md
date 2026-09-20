@@ -56,6 +56,14 @@ _Avoid_: threshold, level, band
 The count of summary compactions in a session's own history, starting at zero. The unit in which a tier fires once-only; only a summary compaction opens a new one, and it is rebuilt from the durable log's own suffix, never from a parent's inherited history or process memory.
 _Avoid_: cycle, round, generation
 
+**Result share**:
+The fraction of the route's capacity one raw tool result may occupy before the plugin reports it. An operator-configured assumption with its own flag, never a reading of how much room a result ought to take.
+_Avoid_: result limit, size threshold, budget
+
+**Oversized result**:
+One raw tool result whose harness-priced size exceeds the route's result share. Priced where the result is dispatched — before the tool's own finalization — so the report may quote more than the model received.
+_Avoid_: large output, big result
+
 **Own suffix**:
 The events of a session's durable log at or after its inherited cut — the history this session wrote. The projection registry supplies that cut as the fork-inherited prefix length passed to a unit's initialization; it must never be inferred from a session id, a first-live sequence or a log marker.
 _Avoid_: own events, session-local log
