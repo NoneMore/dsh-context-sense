@@ -1,0 +1,129 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Package version to release, without the leading v
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release v${{ inputs.version }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - name: Validate release request
+        id: metadata
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_NAME" != "master" ]]; then
+            echo "::error::Release workflow must be run from the master branch."
+            exit 1
+          fi
+
+          if [[ -z "$VERSION" || "$VERSION" == v* ]]; then
+            echo "::error::Enter the package version without a leading v (for example, 0.1.0)."
+            exit 1
+          fi
+
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if [[ "$VERSION" != "$PACKAGE_VERSION" ]]; then
+            echo "::error::Requested version $VERSION does not match package.json version $PACKAGE_VERSION."
+            exit 1
+          fi
+
+          TAG="v$VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists."
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify release
+        run: npm run verify:release
+
+      - name: Build release assets
+        id: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p release-dist
+          npm pack --json --ignore-scripts --pack-destination release-dist > release-dist/pack.json
+
+          TARBALL="$(
+            node -e "
+              const fs = require('node:fs');
+              const result = JSON.parse(fs.readFileSync('release-dist/pack.json', 'utf8'));
+              if (result.length !== 1 || !result[0]?.filename) process.exit(1);
+              process.stdout.write(result[0].filename);
+            "
+          )"
+
+          test -f "release-dist/$TARBALL"
+          (
+            cd release-dist
+            sha256sum "$TARBALL" > "$TARBALL.sha256"
+          )
+
+          echo "tarball=release-dist/$TARBALL" >> "$GITHUB_OUTPUT"
+          echo "checksum=release-dist/$TARBALL.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.metadata.outputs.tag }}
+          PRERELEASE: ${{ steps.metadata.outputs.prerelease }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          CHECKSUM: ${{ steps.pack.outputs.checksum }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            release create "$TAG"
+            "$TARBALL"
+            "$CHECKSUM"
+            --target "$GITHUB_SHA"
+            --title "$TAG"
+            --generate-notes
+            --fail-on-no-commits
+            --notes 'Verified against DeepSeek Harness dsh-v0.1.5-rc.2. DeepSeek Harness is a Developer Preview; compatibility beyond this baseline is not implied.'
+          )
+
+          if [[ "$PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+
+          gh "${args[@]}"
