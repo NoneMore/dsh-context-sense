@@ -1,6 +1,6 @@
 # context-sense
 
-A DeepSeek Harness plugin that gives the model awareness of its own context window: how much room it has, what is occupying that room, and when it is running out.
+A DeepSeek Harness plugin that gives the model awareness of its own context window: how much room it has, what is occupying that room, when it is running out, and what that state calls for.
 
 ## Language
 
@@ -44,9 +44,17 @@ _Avoid_: compaction limit, real threshold
 A source-attributed snapshot of capacity, pressure or composition, attached to the conversation at the moment it was taken.
 _Avoid_: status, report, metrics
 
+**Context guidance**:
+The plugin's standing answer to what a pressure state calls for: an abstract principle about what the model loads next, never a per-tool recipe. It is what makes an unasked reminder arrive authorized rather than as an unexplained interruption.
+_Avoid_: advice, tips, instructions, playbook
+
 **Context reminder**:
-A context reading the model did not ask for, arriving because a pressure ratio reached a tier still eligible in the current reminder epoch, or because one tool result was oversized.
+A context reading the model did not ask for, arriving because a pressure ratio reached a tier still eligible in the current reminder epoch, or because one tool result was oversized, and carrying the guidance its kind owes.
 _Avoid_: warning, alert, notification
+
+**Tool hint**:
+Guidance carried by an oversized-result reminder that is specific to the kind of call that produced the result. Its wording belongs to the deployment rather than to the plugin, because only the deployment knows which tools its model actually over-fetches with.
+_Avoid_: per-tool tip, remediation, suggestion
 
 **Reminder tier**:
 A configured pressure ratio at which a reminder is delivered, at most once per reminder epoch, and only from a route-coherent ratio.
