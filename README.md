@@ -17,13 +17,34 @@ The plugin treats missing measurements as unknown rather than inventing numbers.
 
 ## Install
 
-### npm registry
+This project is distributed through **GitHub source tags and GitHub Release assets only**. It is intentionally marked `private: true` in `package.json` so it cannot be published to the npm registry accidentally.
 
-After the package is published:
+### GitHub Release asset
+
+Each GitHub Release includes a prebuilt `dsh-context-sense-<version>.tgz` plus a SHA-256 checksum. Download the `.tgz`, then install it into the target profile:
 
 ```sh
-dsh plugin --profile demo add dsh-context-sense
+dsh plugin --profile demo add ./dsh-context-sense-0.1.0.tgz
 ```
+
+This path does not require install-time build permission because the release asset already contains `lib/`.
+
+### GitHub source tag
+
+You can also install straight from a release tag:
+
+```sh
+dsh plugin --profile demo add github:NoneMore/dsh-context-sense#v0.1.0
+```
+
+A git install fetches source code, so this package exposes a `prepare` script that builds `lib/` after installation. pnpm 10+ requires explicit approval before running a git dependency's build script. If the first install reports that the build was blocked, add the package to the target profile's `pnpm-workspace.yaml` and retry:
+
+```yaml
+allowBuilds:
+  dsh-context-sense: true
+```
+
+Treat that allowance as permission to execute the package's build script on your machine. Prefer immutable release tags or commit SHAs over a moving branch.
 
 Verify that the bundle layer composes before launching the profile:
 
@@ -31,32 +52,6 @@ Verify that the bundle layer composes before launching the profile:
 dsh --profile demo --dump-config
 dsh --profile demo
 ```
-
-### Tarball
-
-A tarball contains prebuilt `lib/` output and does not require install-time build permission:
-
-```sh
-npm pack
-dsh plugin --profile demo add ./dsh-context-sense-0.1.0.tgz
-```
-
-### GitHub source
-
-A git install fetches source code, so this package exposes a `prepare` script that builds `lib/` after installation:
-
-```sh
-dsh plugin --profile demo add github:NoneMore/dsh-context-sense#<commit>
-```
-
-pnpm 10+ requires explicit approval before running a git dependency's build script. If the first install reports that the build was blocked, add the package to the target profile's `pnpm-workspace.yaml` and retry:
-
-```yaml
-allowBuilds:
-  dsh-context-sense: true
-```
-
-Only grant that permission to source you trust, and prefer pinning a commit rather than a moving branch.
 
 ## Default configuration
 
@@ -109,13 +104,13 @@ npm run smoke:pack
 
 `npm test` builds first and runs the test suite against the emitted `lib/` artifact.
 
-`npm run smoke:pack` exercises the distribution boundary rather than the source checkout: it runs the package's `prepare` build, creates an `npm pack` tarball, checks that runtime imports are declared, installs the tarball into a clean temporary consumer with install scripts disabled, mounts the real DSH test services and loader, and verifies that the packed bundle registers both the `context_reading` tool and the scoped capacity statement.
+`npm run smoke:pack` exercises the GitHub Release artifact boundary rather than the source checkout: it runs the package's `prepare` build, creates the same npm-package-format `.tgz` used as a Release asset, checks that runtime imports are declared, installs that tarball into a clean temporary consumer with install scripts disabled, mounts the real DSH test services and loader, and verifies that the packed bundle registers both the `context_reading` tool and the scoped capacity statement. Using `npm pack` here is only an artifact-building mechanism; this project is not published to the npm registry.
 
-Before publishing, `prepublishOnly` runs `npm run verify:release`, which type-checks, runs the test suite, and executes the packed-install smoke test.
+`npm run verify:release` is the release gate used by GitHub Actions. It type-checks, runs the test suite, and executes the packed-install smoke test before any tag or GitHub Release is created.
 
 ## Release
 
-GitHub releases are created by the `Release` workflow; the workflow does **not** publish to npm.
+GitHub releases are the only packaged distribution channel. The `Release` workflow creates the GitHub tag, the Release, the prebuilt `.tgz`, and its checksum; it does **not** publish to the npm registry. `package.json` is intentionally `private: true` as an additional guard against accidental registry publication.
 
 For a new version, update both package manifests without creating a local tag, then merge that version bump to `master`:
 
