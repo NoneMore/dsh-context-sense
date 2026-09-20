@@ -1,7 +1,7 @@
 {
   "name": "dsh-context-sense",
   "version": "0.1.0",
-  "private": false,
+  "private": true,
   "description": "A DSH plugin that gives the model awareness of its own context window: capacity, pressure, composition and advisory reminders.",
   "keywords": [
     "deepseek",
@@ -21,9 +21,6 @@
     "url": "https://github.com/NoneMore/dsh-context-sense/issues"
   },
   "homepage": "https://github.com/NoneMore/dsh-context-sense#readme",
-  "publishConfig": {
-    "access": "public"
-  },
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -55,8 +52,7 @@
     "test": "npm run build && vitest run",
     "prepare": "npm run build",
     "smoke:pack": "node scripts/packed-install-smoke.mjs",
-    "verify:release": "npm run typecheck && npm test && npm run smoke:pack",
-    "prepublishOnly": "npm run verify:release"
+    "verify:release": "npm run typecheck && npm test && npm run smoke:pack"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",

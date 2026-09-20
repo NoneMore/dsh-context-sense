@@ -54,6 +54,12 @@ jobs:
             exit 1
           fi
 
+          PACKAGE_PRIVATE="$(node -p "String(require('./package.json').private)")"
+          if [[ "$PACKAGE_PRIVATE" != "true" ]]; then
+            echo "::error::package.json must keep private=true; this project is distributed through GitHub, not the npm registry."
+            exit 1
+          fi
+
           TAG="v$VERSION"
           if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
             echo "::error::Tag $TAG already exists."
@@ -119,7 +125,7 @@ jobs:
             --title "$TAG"
             --generate-notes
             --fail-on-no-commits
-            --notes 'Verified against DeepSeek Harness dsh-v0.1.5-rc.2. DeepSeek Harness is a Developer Preview; compatibility beyond this baseline is not implied.'
+            --notes 'Distributed through GitHub Releases only; this project is not published to the npm registry. Verified against DeepSeek Harness dsh-v0.1.5-rc.2. DeepSeek Harness is a Developer Preview; compatibility beyond this baseline is not implied.'
           )
 
           if [[ "$PRERELEASE" == "true" ]]; then
