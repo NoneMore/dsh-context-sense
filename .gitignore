@@ -1,0 +1,5 @@
+# The installed agent skill library. It is a toolchain, not part of this project.
+.agents/
+
+# Dependencies
+node_modules/
