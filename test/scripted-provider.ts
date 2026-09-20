@@ -48,7 +48,8 @@ export class ScriptedAdapter extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
 
   constructor(
-    private readonly contextWindow: number,
+    /** The capacity this route advertises, or `undefined` for a route that advertises none. */
+    private readonly contextWindow: number | undefined,
     private readonly options: ScriptedAdapterOptions = {},
   ) {
     super()
@@ -59,7 +60,7 @@ export class ScriptedAdapter extends LlmAdapter {
       provider,
       id: model,
       name: model,
-      context: { contextWindow: this.contextWindow },
+      ...(this.contextWindow === undefined ? {} : { context: { contextWindow: this.contextWindow } }),
     })
   }
 

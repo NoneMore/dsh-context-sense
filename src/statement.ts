@@ -11,6 +11,7 @@
  */
 import { formatPercent } from './reading.js'
 import { CONTEXT_READING_TOOL_NAME } from './reading-tool.js'
+import { REMINDER_DISCLAIMER } from './reminder.js'
 
 /** The facts the statement states, resolved at each prompt assembly. */
 export interface CapacityStatementInput {
@@ -80,6 +81,13 @@ function capacitySentence(contextWindow: number | undefined): string {
  * @returns one sentence of the statement.
  */
 function reminderSentence(reminderTiers: readonly number[]): string {
+  if (reminderTiers.length === 0) {
+    // An empty list is a valid configuration: the strict rules constrain each
+    // tier, not how many there are, and disabling reminders arrives here too.
+    // Saying so is what keeps the statement a true sentence — and what stops it
+    // promising the model a reminder no step will ever deliver.
+    return 'No advisory context reminder tiers are configured, so no reminder will interrupt a step as this history grows.'
+  }
   const tiers = reminderTiers.map(formatPercent).join(' and ')
-  return `Advisory context reminders arrive at ${tiers} of the context window. A reminder describes committed history rather than the request being assembled, and the threshold it names is an assumed policy value, not a reading of the mounted compaction policy.`
+  return `Advisory context reminders arrive at ${tiers} of the context window. ${REMINDER_DISCLAIMER}`
 }

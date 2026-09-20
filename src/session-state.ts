@@ -176,6 +176,28 @@ export function isSampleAttributedTo(state: ContextSenseState, route: ResolvedRo
 }
 
 /**
+ * Whether a pressure figure may be paired with the route behind the reported
+ * capacity.
+ *
+ * This is the one gate both observation points ask: the reading the model can
+ * request and the tier a step decides on have to agree about whether the two
+ * figures belong to the same route, so the answer lives here rather than in each
+ * caller. It is deliberately conservative — a session with no memory yet, a
+ * capacity from no recorded route, or a newest sample that names another route
+ * can never be shown coherent, and `undefined` in place of a figure is not a
+ * pairing at all.
+ * @param state - the folded state, or `undefined` when the unit has not been driven yet.
+ * @param route - the provider and model the capacity belongs to, when one is known.
+ * @returns whether a ratio may be formed from the current pressure and capacity.
+ */
+export function isPressureRouteCoherent(
+  state: ContextSenseState | undefined,
+  route: ResolvedRoute | null | undefined,
+): boolean {
+  return state !== undefined && isSampleAttributedTo(state, route)
+}
+
+/**
  * Whether a compaction checkpoint is on the surface this session sends.
  *
  * True for a fork that sends its parent's checkpoint without having compacted

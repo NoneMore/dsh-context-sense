@@ -170,11 +170,25 @@ function capacityFigure(contextWindow: number | undefined): CapacityFigure {
 }
 
 /**
- * Pressure is the harness's projection of the next request's prompt size. The
- * figure is `projectedTokens ?? pressureTokens` — the same numerator the human
- * meter shows — and it is provider-anchored: with neither field there is no
- * provider usage sample yet, so the state is `unknown` and the figure carries
- * no source rather than falling back to composition.
+ * The pressure numerator: `projectedTokens ?? pressureTokens`.
+ *
+ * This is the same figure the human context meter shows and the same one a tier
+ * decision compares with the capacity, so the rule lives in one place. With
+ * neither field there is no provider usage sample yet, and pressure is unknown —
+ * there is deliberately no fallback to composition.
+ * @param pressure - the `contextPressure` projection value, if registered.
+ * @returns the figure, or `undefined` when nothing has measured the session.
+ */
+export function projectedPressureTokens(pressure: ContextPressureProjection | undefined): number | undefined {
+  return pressure?.projectedTokens ?? pressure?.pressureTokens
+}
+
+/**
+ * Pressure is the harness's projection of the next request's prompt size, at the
+ * figure {@link projectedPressureTokens} states, and it is provider-anchored:
+ * with neither field there is no provider usage sample yet, so the state is
+ * `unknown` and the figure carries no source rather than falling back to
+ * composition.
  *
  * A figure the plugin cannot show belongs to the recorded route is `stale`, not
  * `known`: it is a real measurement of a route this session may have left.
@@ -186,7 +200,7 @@ function pressureFigure(
   pressure: ContextPressureProjection | undefined,
   routeCoherent: boolean,
 ): PressureFigure {
-  const tokens = pressure?.projectedTokens ?? pressure?.pressureTokens
+  const tokens = projectedPressureTokens(pressure)
   if (tokens === undefined) return { state: 'unknown' }
   if (!routeCoherent) return { state: 'stale', tokens, provenance: PROVIDER_ANCHORED }
   return { state: 'known', tokens, provenance: PROVIDER_ANCHORED }

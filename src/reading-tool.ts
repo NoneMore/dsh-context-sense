@@ -16,7 +16,7 @@ import type { SessionProjectionRegistry } from '@deepseek-ai/dsh-session-project
 import { defineTool, type ToolDefinition, type ValueSchemaSpec } from '@deepseek-ai/dsh-tools'
 
 import { buildContextReading, renderContextReading, type ContextReading } from './reading.js'
-import { CONTEXT_SENSE_KEY, hasVisibleCheckpoint, isSampleAttributedTo } from './session-state.js'
+import { CONTEXT_SENSE_KEY, hasVisibleCheckpoint, isPressureRouteCoherent } from './session-state.js'
 
 /** The tool's model-facing name. Distinct from every built-in tool name. */
 export const CONTEXT_READING_TOOL_NAME = 'context_reading'
@@ -198,7 +198,7 @@ function readLiveContext(agent: Agent | undefined, projections: SessionProjectio
     // memory, never from a comparison made up at read time. The route the gate
     // tests is the capacity's own route, so the ratio pairs the two figures the
     // model is actually being shown.
-    routeCoherent: state !== undefined && isSampleAttributedTo(state, contextWindow),
+    routeCoherent: isPressureRouteCoherent(state, contextWindow),
     compaction: {
       occurredInSession: state?.compactedInSession ?? false,
       checkpointVisible: state !== undefined && hasVisibleCheckpoint(state),

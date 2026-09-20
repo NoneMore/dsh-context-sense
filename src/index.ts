@@ -4,8 +4,9 @@
  * This plugin contributes a standing system-prompt statement, registered once
  * per agent, of how much room the current route allows — or a plain statement
  * that capacity is not yet known — the parameterless `context_reading` tool,
- * which reports a source-attributed reading of the live session on demand, and
- * its own durable, replayable memory of the session's model-visible surface.
+ * which reports a source-attributed reading of the live session on demand, an
+ * advisory reminder when committed history reaches a configured pressure tier,
+ * and its own durable, replayable memory of the session's model-visible surface.
  *
  * @module dsh-context-sense
  */
@@ -15,8 +16,14 @@ import z from '@deepseek-ai/schemastery'
 
 import { PLUGIN_NAME } from './identity.js'
 import { createContextReadingTool } from './reading-tool.js'
+import {
+  DEFAULT_COMPACTION_THRESHOLD_RATIO,
+  DEFAULT_REMINDER_TIERS,
+  resolveReminderPolicy,
+} from './reminder.js'
 import { contextSenseProjection } from './session-state.js'
 import { CAPACITY_SECTION_NAME, CAPACITY_STATEMENT_ORDER, renderCapacityStatement } from './statement.js'
+import { installTierReminders } from './tier-reminders.js'
 
 /**
  * The plugin's identity, used for attribution and as its name in diagnostics.
@@ -54,8 +61,25 @@ export const Config = z.object({
     })
     // Stated in full because an object default is the whole value, not a patch.
     .default({ enabled: true }),
-  /** Reminder tier ratios, as fractions of the context window. */
-  reminderTiers: z.array(z.number()).default([0.6, 0.75]),
+  reminders: z
+    .object({
+      /** Deliver pressure-tier reminders. Independent of the statement and tool flags. */
+      enabled: z.boolean().default(true),
+      /** Reminder tier ratios, strictly ascending and strictly below the assumed threshold. */
+      tiers: z.array(z.number()).default([...DEFAULT_REMINDER_TIERS]),
+      /**
+       * The compaction threshold this deployment assumes, as a fraction of the
+       * context window. Used only for headroom wording and tier validation —
+       * never read as the policy the mounted compaction backend enforces.
+       */
+      compactionThresholdRatio: z.number().default(DEFAULT_COMPACTION_THRESHOLD_RATIO),
+    })
+    // Stated in full because an object default is the whole value, not a patch.
+    .default({
+      enabled: true,
+      tiers: [...DEFAULT_REMINDER_TIERS],
+      compactionThresholdRatio: DEFAULT_COMPACTION_THRESHOLD_RATIO,
+    }),
 })
 
 /** Validated plugin config. */
@@ -67,16 +91,30 @@ export type ContextSenseConfig = Schemastery.TypeT<typeof Config>
  * @param config - validated plugin config.
  */
 export function apply(ctx: Context, config: ContextSenseConfig): void {
+  // Validated before anything is registered. An unusable policy is a
+  // deployment error: it fails the plugin at load, rather than being silently
+  // clamped into a shape the operator did not ask for, and that holds whether
+  // or not the reminders it configures are switched on.
+  const policy = resolveReminderPolicy(config.reminders)
+
   // Registered first and unconditionally: the surface memory is the plugin's
-  // own durable state, and the tool's reading is one of the faces it has.
-  // Registration is an effect on this plugin's fiber, so unloading the plugin
-  // removes the unit along with everything else it contributed.
+  // own durable state, and the tool's reading and the tier decision are the
+  // faces it has. Registration is an effect on this plugin's fiber, so
+  // unloading the plugin removes the unit along with everything else it
+  // contributed.
   ctx.sessionProjections.register(contextSenseProjection)
 
-  // The statement and the tool are independently switchable: a deployment may
-  // want the standing statement without a tool, or the reverse.
-  if (config.statement.enabled) installCapacityStatements(ctx, config.reminderTiers)
+  // The statement names the tiers a reminder will actually arrive at. A
+  // switched-off reminder subsystem must not tell the model to expect warnings
+  // that will never come, so the tiers it advertises are the ones in force.
+  const announcedTiers = config.reminders.enabled ? config.reminders.tiers : []
+
+  // The statement, the tool and the reminders are independently switchable: a
+  // deployment may want the standing statement without a tool, or the reading
+  // without being interrupted.
+  if (config.statement.enabled) installCapacityStatements(ctx, announcedTiers)
   if (config.tool.enabled) ctx.tools.register(createContextReadingTool(ctx.sessionProjections))
+  if (config.reminders.enabled) installTierReminders(ctx, policy)
 }
 
 /**

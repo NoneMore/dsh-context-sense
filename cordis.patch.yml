@@ -15,7 +15,11 @@
     - id: context-sense
       name: dsh-context-sense
       config:
-        # The standing capacity statement in each agent's system prompt. The
-        # reminder tiers keep their schema defaults (0.60 and 0.75).
+        # The standing capacity statement in each agent's system prompt.
         statement:
+          enabled: true
+        # Advisory pressure-tier reminders. The tier ratios and the assumed
+        # compaction threshold keep their schema defaults: 0.60 and 0.75 for the
+        # tiers, 0.80 for the threshold the headroom wording assumes.
+        reminders:
           enabled: true

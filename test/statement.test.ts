@@ -41,4 +41,15 @@ describe('capacity statement text', () => {
     // The rendered wording the ticket fixes; the concept it names is the
     // glossary's "assumed compaction threshold".
     expect(text).toContain('assumed policy value')
-  })})
+  })
+
+  it('says plainly that no reminder will arrive when no tier is configured', () => {
+    // An empty tier list is a valid configuration — the rules constrain each
+    // tier, not the count — so the statement must still read as a sentence
+    // rather than as a list of nothing.
+    const text = renderCapacityStatement({ contextWindow: 131072, reminderTiers: [] })
+
+    expect(text).toContain('No advisory context reminder tiers are configured')
+    expect(text).not.toContain('arrive at  of')
+  })
+})
