@@ -1,6 +1,6 @@
 # context-sense
 
-A DeepSeek Harness plugin that gives the model awareness of its own context window: how much room it has, what is occupying that room, when it is running out, and what that state calls for.
+A DeepSeek Harness plugin that gives the model awareness of its own context window: how much room the current route leaves, when it is running out, and what that state calls for. The model reads that awareness from advisory reminders by default, and from an opt-in preflight probe when a deployment enables one.
 
 ## Language
 
@@ -41,11 +41,15 @@ The compaction threshold ratio this plugin's config declares, used for headroom 
 _Avoid_: compaction limit, real threshold
 
 **Context reading**:
-A source-attributed snapshot of capacity, pressure or composition, attached to the conversation at the moment it was taken.
+A snapshot of the current route's capacity and of what committed history is projected to cost, attached to the conversation at the moment it was taken. A figure the plugin cannot attribute to that route is marked unusable rather than replaced by another number.
 _Avoid_: status, report, metrics
 
+**Preflight reading**:
+A context reading the model asks for before work that will load substantial context, to decide how broadly to retrieve.
+_Avoid_: context check, budget check, usage report
+
 **Context guidance**:
-The plugin's standing answer to what a pressure state calls for: an abstract principle about what the model loads next, never a per-tool recipe. It is what makes an unasked reminder arrive authorized rather than as an unexplained interruption.
+What a notice says about managing the context it just reported: an abstract principle about what the model loads next, never a per-tool recipe. The standing statement authorizes such guidance; the notice that observed the event carries it.
 _Avoid_: advice, tips, instructions, playbook
 
 **Context reminder**:
